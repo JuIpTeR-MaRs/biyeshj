@@ -35,6 +35,9 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     /// @notice 被监护人地址 => 监护人地址
     mapping(address => address) public wardToGuardian;
     
+    /// @notice 被监护人地址 => 申请中的监护人地址
+    mapping(address => address) public pendingWardToGuardian;
+
     /// @notice 被监护人地址 => 消费预警阈值
     mapping(address => uint256) public threshold;
     
@@ -49,6 +52,9 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     event TransactionRejected(uint256 indexed txId, address indexed guardian);
     event GuardianBound(address indexed ward, address indexed guardian);
     event ThresholdSet(address indexed ward, uint256 amount);
+    event GuardianshipRequested(address indexed ward, address indexed guardian);
+    event GuardianshipAccepted(address indexed ward, address indexed guardian);
+    event GuardianshipRejected(address indexed ward, address indexed guardian);
 
     // --- 修饰符 ---
 
@@ -72,17 +78,46 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice 绑定被监护人与监护人
-     * @param _ward 被监护人地址
+     * @notice 被监护人发起绑定监护人申请
      * @param _guardian 监护人地址
      */
-    function bindGuardian(address _ward, address _guardian) external {
-        require(_ward != address(0) && _guardian != address(0), "GuardianDApp: Invalid address");
-        require(_ward != _guardian, "GuardianDApp: Ward cannot be guardian");
+    function requestGuardian(address _guardian) external {
+        require(_guardian != address(0), "GuardianDApp: Invalid address");
+        require(msg.sender != _guardian, "GuardianDApp: Cannot be your own guardian");
         
-        // 权限：仅允许被监护人自己绑定或 Owner 进行初始化
-        require(msg.sender == _ward || msg.sender == owner(), "GuardianDApp: Unauthorized");
+        pendingWardToGuardian[msg.sender] = _guardian;
+        emit GuardianshipRequested(msg.sender, _guardian);
+    }
 
+    /**
+     * @notice 监护人同意绑定申请
+     * @param _ward 发起申请的被监护人地址
+     */
+    function acceptGuardianship(address _ward) external {
+        require(pendingWardToGuardian[_ward] == msg.sender, "GuardianDApp: No pending request for you");
+        
+        wardToGuardian[_ward] = msg.sender;
+        delete pendingWardToGuardian[_ward];
+        
+        emit GuardianshipAccepted(_ward, msg.sender);
+        emit GuardianBound(_ward, msg.sender);
+    }
+
+    /**
+     * @notice 监护人拒绝绑定申请
+     * @param _ward 发起申请的被监护人地址
+     */
+    function rejectGuardianship(address _ward) external {
+        require(pendingWardToGuardian[_ward] == msg.sender, "GuardianDApp: No pending request for you");
+        
+        delete pendingWardToGuardian[_ward];
+        emit GuardianshipRejected(_ward, msg.sender);
+    }
+
+    /**
+     * @notice 管理员手动绑定（保留用于初始化）
+     */
+    function bindGuardian(address _ward, address _guardian) external onlyOwner {
         wardToGuardian[_ward] = _guardian;
         emit GuardianBound(_ward, _guardian);
     }

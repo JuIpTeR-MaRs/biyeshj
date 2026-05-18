@@ -4,22 +4,27 @@ import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { WalletConnect } from './components/WalletConnect';
 import { PendingList } from './components/PendingList';
+import { LoginPage } from './components/Login/LoginPage';
+import { RequestList } from './components/RequestList';
 import { getContract, CONTRACT_ADDRESS } from './utils/contract';
+import { getLocalBankUser } from './utils/bankAccount';
 
 function App() {
   const [account, setAccount] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [role, setRole] = useState(null);
   const [pendingTxs, setPendingTxs] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const connectWallet = async (bankAccount) => {
-    try {
-      // 接收来自 WalletConnect 的银行账户对象
-      setAccount(bankAccount.address);
-      toast.success(`欢迎登录，卡号: ${bankAccount.cardNumber.slice(-4)}`);
-    } catch (err) {
-      toast.error("登录失败");
-    }
+  const connectWallet = (bankAccount) => {
+    setAccount(bankAccount.address);
+    setIsLoggedIn(true);
+  };
+
+  const handleLogout = () => {
+    setIsLoggedIn(false);
+    setAccount(null);
   };
 
   const fetchData = useCallback(async () => {
@@ -27,20 +32,27 @@ function App() {
     try {
       const contract = await getContract();
       
-      // 获取分配给当前地址作为监护人的所有待处理交易
       const ids = await contract.getPendingTransactions(account);
-      const txDetails = await Promise.all(
-        ids.map(id => contract.transactions(id))
-      );
-      
+      const txDetails = await Promise.all(ids.map(id => contract.transactions(id)));
       setPendingTxs(txDetails.map(d => ({
         id: d[0], ward: d[1], amount: d[2].toString(), 
         timestamp: d[3], merchantType: d[4], isPending: d[5]
       })));
-      
-      // 简单逻辑判断角色：如果能获取到分配给自己的待处理交易，则是监护人
-      // 在实际应用中应查询 wardToGuardian 映射
-      setRole(ids.length > 0 || txDetails.length > 0 ? 'guardian' : 'ward');
+
+      const allAccounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
+      const requests = [];
+      for (const accInfo of allAccounts) {
+        try {
+          const pending = await contract.pendingWardToGuardian(accInfo.address);
+          if (pending.toLowerCase() === account.toLowerCase()) {
+            requests.push(accInfo);
+          }
+        } catch (e) {}
+      }
+      setPendingRequests(requests);
+
+      const isGuardianOnChain = ids.length > 0 || txDetails.length > 0 || requests.length > 0;
+      setRole(isGuardianOnChain ? 'guardian' : 'ward');
     } catch (err) {
       console.error("Fetch Data Error:", err);
     }
@@ -62,11 +74,29 @@ function App() {
     }
   };
 
+  const handleRequestAction = async (wardAddress, approve) => {
+    setLoading(true);
+    try {
+      const contract = await getContract();
+      const tx = approve 
+        ? await contract.acceptGuardianship(wardAddress)
+        : await contract.rejectGuardianship(wardAddress);
+      
+      toast.info("正在上链同步绑定关系...");
+      await tx.wait();
+      toast.success(approve ? "已成功绑定监护关系" : "已拒绝绑定请求");
+      fetchData();
+    } catch (err) {
+      toast.error("操作失败，请重试");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    if (account) {
+    if (account && isLoggedIn) {
       fetchData();
       
-      // 实时监听预警事件 - 使用本地 JSON-RPC
       const provider = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
       const contract = new ethers.Contract(CONTRACT_ADDRESS, ["event PaymentPendingApproval(uint256 indexed txId, address indexed ward, uint256 amount)"], provider);
       
@@ -82,13 +112,17 @@ function App() {
       contract.on("PaymentPendingApproval", onPending);
       return () => contract.off("PaymentPendingApproval", onPending);
     }
-  }, [account, fetchData]);
+  }, [account, isLoggedIn, fetchData]);
+
+  if (!isLoggedIn) {
+    return <LoginPage onLogin={connectWallet} />;
+  }
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 selection:bg-blue-100">
       <div className="max-w-3xl mx-auto py-12 px-6">
         <div className="bg-white rounded-[40px] shadow-2xl shadow-blue-100 overflow-hidden border border-white">
-          <WalletConnect account={account} onConnect={connectWallet} />
+          <WalletConnect account={account} onConnect={connectWallet} onLogout={handleLogout} />
           
           <div className="p-8 lg:p-12">
             {!account ? (
@@ -112,7 +146,10 @@ function App() {
                 </div>
 
                 {role === 'guardian' ? (
-                  <PendingList txs={pendingTxs} onAction={handleAction} loading={loading} />
+                  <>
+                    <RequestList requests={pendingRequests} onAction={handleRequestAction} loading={loading} />
+                    <PendingList txs={pendingTxs} onAction={handleAction} loading={loading} />
+                  </>
                 ) : (
                   <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[32px] p-10 text-white shadow-xl shadow-blue-200">
                     <h3 className="text-2xl font-bold mb-4">您的钱包已受保护</h3>

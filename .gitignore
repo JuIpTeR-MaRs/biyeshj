@@ -32,3 +32,8 @@ dist_electron/
 *.njsproj
 *.sln
 *.sw?
+
+# Alipay Sandbox & Mock Server configuration/keys
+scripts/alipay_keys/
+mock-server/env
+response.html

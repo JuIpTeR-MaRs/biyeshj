@@ -57,6 +57,7 @@ export const seedTestAccount = () => {
   if (!accounts.find(a => a.phone === wardPhone)) {
     const wardAccount = createLocalBankAccount(wardPhone, "123");
     wardAccount.accountName = "被监护人 (张三)";
+    wardAccount.role = "ward";
     accounts.push(wardAccount);
   }
 
@@ -65,6 +66,7 @@ export const seedTestAccount = () => {
   if (!accounts.find(a => a.phone === guardianPhone)) {
     const guardianAccount = createLocalBankAccount(guardianPhone, "123");
     guardianAccount.accountName = "监护人 (李四)";
+    guardianAccount.role = "guardian";
     accounts.push(guardianAccount);
   }
 

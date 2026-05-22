@@ -24,7 +24,7 @@ async function main() {
   
   // 1. Bind relationship
   console.log(`🔗 Binding ward ${ward.address} to guardian ${guardian.address}`);
-  await dapp.connect(ward).bindGuardian(ward.address, guardian.address);
+  await dapp.connect(oracle).bindGuardian(ward.address, guardian.address);
   
   // 2. Set threshold to 800 Wei
   console.log("💰 Setting threshold to 800 Wei for ward");

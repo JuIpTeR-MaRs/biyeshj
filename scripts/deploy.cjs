@@ -20,11 +20,19 @@ async function main() {
     fs.mkdirSync(mockServerDir);
   }
 
-  // Update or Create .env in mock-server
+  // Update or Create .env in mock-server (preserving ALIPAY_ variables)
   const envPath = path.join(mockServerDir, ".env");
-  const envContent = `RPC_URL=http://127.0.0.1:8545\nORACLE_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80\nCONTRACT_ADDRESS=${address}\nPORT=3000`;
+  let alipayContent = "";
+  if (fs.existsSync(envPath)) {
+    const existingContent = fs.readFileSync(envPath, "utf8");
+    const alipayLines = existingContent.split("\n").filter(line => line.trim().startsWith("ALIPAY_"));
+    if (alipayLines.length > 0) {
+      alipayContent = "\n\n" + alipayLines.join("\n");
+    }
+  }
+  const envContent = `RPC_URL=http://127.0.0.1:8545\nORACLE_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80\nCONTRACT_ADDRESS=${address}\nPORT=3000${alipayContent}`;
   fs.writeFileSync(envPath, envContent);
-  console.log("📝 Updated mock-server/.env");
+  console.log("📝 Updated mock-server/.env (preserved Alipay configs)");
 
   // Also update frontend constant if needed
   const contractUtilPath = path.join(__dirname, "../src/utils/contract.js");

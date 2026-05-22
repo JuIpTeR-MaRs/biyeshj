@@ -11,21 +11,25 @@ describe("GuardianDApp Contract", function () {
   });
 
   describe("Binding", function () {
-    it("Should allow a ward to bind a guardian", async function () {
-      await dapp.connect(ward).bindGuardian(ward.address, guardian.address);
+    it("Should allow a ward to request and a guardian to accept", async function () {
+      await dapp.connect(ward).requestGuardian(guardian.address);
+      expect(await dapp.pendingWardToGuardian(ward.address)).to.equal(guardian.address);
+      
+      await dapp.connect(guardian).acceptGuardianship(ward.address);
       expect(await dapp.wardToGuardian(ward.address)).to.equal(guardian.address);
     });
 
     it("Should fail if ward is same as guardian", async function () {
       await expect(
-        dapp.connect(ward).bindGuardian(ward.address, ward.address)
-      ).to.be.revertedWith("GuardianDApp: Ward cannot be guardian");
+        dapp.connect(ward).requestGuardian(ward.address)
+      ).to.be.revertedWith("GuardianDApp: Cannot be your own guardian");
     });
   });
 
   describe("Payments", function () {
     beforeEach(async function () {
-      await dapp.connect(ward).bindGuardian(ward.address, guardian.address);
+      // bindGuardian is onlyOwner, so we call it with oracle (owner)
+      await dapp.connect(oracle).bindGuardian(ward.address, guardian.address);
       await dapp.connect(ward).setThreshold(1000);
     });
 
@@ -46,7 +50,8 @@ describe("GuardianDApp Contract", function () {
 
   describe("Approval", function () {
     beforeEach(async function () {
-      await dapp.connect(ward).bindGuardian(ward.address, guardian.address);
+      // bindGuardian is onlyOwner, so we call it with oracle (owner)
+      await dapp.connect(oracle).bindGuardian(ward.address, guardian.address);
       await dapp.connect(ward).setThreshold(1000);
       await dapp.connect(oracle).recordPayment(ward.address, 1500, "Laptop");
     });

@@ -1,6 +1,6 @@
 const express = require("express");
 const paymentService = require("./payment-mock");
-require("dotenv").config();
+require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 
 const app = express();
 app.use(express.json());
@@ -33,6 +33,472 @@ app.get("/api/bank/account/:card", (req, res) => {
         accountType: "Debit Card",
         bank: "Local Simulation Bank"
     });
+});
+
+// 支付宝 SDK 初始化
+const { AlipaySdk } = require("alipay-sdk");
+const alipaySdk = new AlipaySdk({
+    appId: process.env.ALIPAY_APP_ID,
+    privateKey: process.env.ALIPAY_PRIVATE_KEY,
+    alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY,
+    gateway: process.env.ALIPAY_GATEWAY,
+    keyType: 'PKCS8'
+});
+
+const categoryCodes = {
+    "餐饮美食": "FOOD",
+    "医疗健康": "HLTH",
+    "娱乐购物": "SHOP",
+    "交通出行": "TRAV"
+};
+
+const categoryNames = {
+    "FOOD": "餐饮美食",
+    "HLTH": "医疗健康",
+    "SHOP": "娱乐购物",
+    "TRAV": "交通出行"
+};
+
+// 3. 发起支付宝沙箱支付 (预创建订单以获取二维码)
+app.post("/api/alipay/pay", async (req, res) => {
+    const { amount, subject, wardAddress } = req.body;
+    console.log(`💳 [Alipay] Precreating order for ward ${wardAddress}, amount: ${amount} Wei, category: ${subject}`);
+
+    try {
+        const code = categoryCodes[subject] || "SHOP";
+        // 编码 outTradeNo 保证在 64 字节限制内且携带所有必要信息
+        // 格式: [wardAddress_without_0x]_[category_code]_[timestamp]
+        const outTradeNo = `${wardAddress.replace(/^0x/, "")}_${code}_${Date.now()}`;
+
+        const result = await alipaySdk.exec('alipay.trade.precreate', {
+            bizContent: {
+                outTradeNo: outTradeNo,
+                totalAmount: amount.toString(), // 把 Wei 金额 1:1 作为人民币元传递
+                subject: `智能监护支付 - ${subject}`,
+            }
+        });
+
+        // 提取返回的 qrCode / qr_code
+        const qrCode = result.qrCode || result.qr_code || 
+            (result.alipay_trade_precreate_response && 
+                (result.alipay_trade_precreate_response.qr_code || result.alipay_trade_precreate_response.qrCode));
+
+        if (!qrCode) {
+            console.error("Alipay precreate response missing qrCode:", result);
+            return res.status(500).json({ success: false, error: "支付宝未返回二维码链接" });
+        }
+
+        console.log(`🔗 [Alipay] QR Code generated successfully: ${qrCode}`);
+        res.json({ success: true, qrCode, outTradeNo });
+    } catch (err) {
+        console.error("Alipay error:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+const processedTrades = new Set();
+
+// 3.5 查询支付宝支付状态并上链
+app.get("/api/alipay/query", async (req, res) => {
+    const { outTradeNo } = req.query;
+    if (!outTradeNo) {
+        return res.status(400).json({ success: false, error: "缺少订单号 outTradeNo" });
+    }
+
+    try {
+        const result = await alipaySdk.exec('alipay.trade.query', {
+            bizContent: {
+                outTradeNo: outTradeNo
+            }
+        });
+
+        const tradeStatus = result.tradeStatus || result.trade_status || 
+            (result.alipay_trade_query_response && 
+                (result.alipay_trade_query_response.trade_status || result.alipay_trade_query_response.tradeStatus));
+
+        const totalAmount = result.totalAmount || result.total_amount || 
+            (result.alipay_trade_query_response && 
+                (result.alipay_trade_query_response.total_amount || result.alipay_trade_query_response.totalAmount));
+
+        console.log(`🔍 [Alipay Query] Trade ${outTradeNo} status: ${tradeStatus || 'NOT_SCAN_YET'}`);
+
+        if (tradeStatus === 'TRADE_SUCCESS') {
+            if (!processedTrades.has(outTradeNo)) {
+                processedTrades.add(outTradeNo);
+
+                // 解析 outTradeNo 并记账上链
+                const [addressRaw, code, timestamp] = outTradeNo.split("_");
+                const wardAddress = "0x" + addressRaw;
+                const category = categoryNames[code] || "模拟消费";
+                const amount = Math.floor(parseFloat(totalAmount));
+
+                console.log(`✅ [Alipay Query] Verified success! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}`);
+                const recordResult = await paymentService.recordOnChain(wardAddress, amount, category);
+                
+                if (!recordResult.success) {
+                    // 如果录入失败，从已处理列表中移除，以便下次查询重试
+                    processedTrades.delete(outTradeNo);
+                    return res.status(500).json({ success: false, error: recordResult.error });
+                }
+            }
+            return res.json({ success: true, status: 'TRADE_SUCCESS' });
+        } else if (tradeStatus === 'WAIT_BUYER_PAY') {
+            return res.json({ success: true, status: 'WAIT_BUYER_PAY' });
+        } else if (tradeStatus === 'TRADE_CLOSED') {
+            return res.json({ success: true, status: 'FAILED' });
+        } else {
+            return res.json({ success: true, status: tradeStatus || 'UNKNOWN' });
+        }
+    } catch (err) {
+        console.error("Alipay query error:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 4. 接收支付宝支付后的同步重定向并验签上链
+app.get("/api/alipay/return", async (req, res) => {
+    console.log("🔔 [Alipay Return] Verifying signature...", req.query);
+    try {
+        const isValid = alipaySdk.checkNotifySign(req.query);
+        if (!isValid) {
+            console.warn("❌ [Alipay Return] Signature verification failed!");
+            return res.send(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>支付校验失败 | 智能监护系统</title>
+                    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+                    <style>
+                        * {
+                            box-sizing: border-box;
+                            margin: 0;
+                            padding: 0;
+                        }
+                        body {
+                            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                            background: linear-gradient(135deg, #fef2f2 0%, #fff7ed 100%);
+                            min-height: 100vh;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            padding: 24px;
+                            color: #1e293b;
+                        }
+                        .card {
+                            background: rgba(255, 255, 255, 0.85);
+                            backdrop-filter: blur(20px);
+                            -webkit-backdrop-filter: blur(20px);
+                            border: 1px solid rgba(255, 255, 255, 0.7);
+                            border-radius: 36px;
+                            padding: 48px 32px;
+                            max-width: 480px;
+                            width: 100%;
+                            text-align: center;
+                            box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.08);
+                            animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+                        }
+                        @keyframes fadeIn {
+                            from { opacity: 0; transform: translateY(20px); }
+                            to { opacity: 1; transform: translateY(0); }
+                        }
+                        .icon-wrapper {
+                            width: 96px;
+                            height: 96px;
+                            background: #ffe4e6;
+                            border-radius: 50%;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            margin: 0 auto 28px;
+                            position: relative;
+                            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+                        }
+                        @keyframes shake {
+                            10%, 90% { transform: translate3d(-1px, 0, 0); }
+                            20%, 80% { transform: translate3d(2px, 0, 0); }
+                            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+                            40%, 60% { transform: translate3d(4px, 0, 0); }
+                        }
+                        .error-svg {
+                            width: 48px;
+                            height: 48px;
+                            stroke: #e11d48;
+                            stroke-width: 4;
+                            stroke-linecap: round;
+                            stroke-linejoin: round;
+                            fill: none;
+                            z-index: 2;
+                        }
+                        .cross-path1, .cross-path2 {
+                            stroke-dasharray: 100;
+                            stroke-dashoffset: 100;
+                        }
+                        .cross-path1 {
+                            animation: drawCross 0.4s cubic-bezier(0.65, 0, 0.45, 1) 0.2s forwards;
+                        }
+                        .cross-path2 {
+                            animation: drawCross 0.4s cubic-bezier(0.65, 0, 0.45, 1) 0.4s forwards;
+                        }
+                        @keyframes drawCross {
+                            to { stroke-dashoffset: 0; }
+                        }
+                        h2 {
+                            font-size: 28px;
+                            font-weight: 800;
+                            margin-bottom: 12px;
+                            background: linear-gradient(135deg, #e11d48 0%, #ea580c 100%);
+                            -webkit-background-clip: text;
+                            -webkit-text-fill-color: transparent;
+                        }
+                        .status-badge {
+                            display: inline-block;
+                            background: #ffe4e6;
+                            color: #b91c1c;
+                            font-weight: 600;
+                            font-size: 13px;
+                            padding: 6px 14px;
+                            border-radius: 100px;
+                            margin-bottom: 24px;
+                        }
+                        p {
+                            font-size: 15px;
+                            line-height: 1.6;
+                            color: #64748b;
+                            margin-bottom: 32px;
+                        }
+                        .btn {
+                            display: inline-flex;
+                            align-items: center;
+                            justify-content: center;
+                            width: 100%;
+                            background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
+                            color: white;
+                            border: none;
+                            padding: 16px 28px;
+                            border-radius: 18px;
+                            font-weight: 600;
+                            font-size: 16px;
+                            cursor: pointer;
+                            box-shadow: 0 10px 15px -3px rgba(244, 63, 94, 0.3);
+                            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+                        }
+                        .btn:hover {
+                            transform: translateY(-2px);
+                            box-shadow: 0 12px 20px -3px rgba(244, 63, 94, 0.4);
+                            filter: brightness(1.05);
+                        }
+                        .btn:active {
+                            transform: translateY(1px);
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="card">
+                        <div class="icon-wrapper">
+                            <svg class="error-svg" viewBox="0 0 24 24">
+                                <path class="cross-path1" d="M18 6L6 18" />
+                                <path class="cross-path2" d="M6 6l12 12" />
+                            </svg>
+                        </div>
+                        <h2>支付校验失败</h2>
+                        <span class="status-badge">Sign Verification Failed</span>
+                        <p>数字签名验证失败，交易未能安全记录上链。<br>如果您是在系统浏览器中遇到了此提示，可以关闭当前窗口并返回客户端重试。</p>
+                        <button class="btn" onclick="window.close()">关闭当前窗口</button>
+                    </div>
+                </body>
+                </html>
+            `);
+        }
+
+        const outTradeNo = req.query.out_trade_no;
+        const [addressRaw, code, timestamp] = outTradeNo.split("_");
+        const wardAddress = "0x" + addressRaw;
+        const category = categoryNames[code] || "模拟消费";
+        const amount = req.query.total_amount;
+
+        console.log(`✅ [Alipay Return] Verified! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}`);
+
+        // 作为预言机调用智能合约上链记账
+        const result = await paymentService.recordOnChain(wardAddress, Math.floor(parseFloat(amount)), category);
+        
+        if (result.success) {
+            res.send(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>支付成功 | 智能监护系统</title>
+                    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+                    <style>
+                        * {
+                            box-sizing: border-box;
+                            margin: 0;
+                            padding: 0;
+                        }
+                        body {
+                            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                            background: linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%);
+                            min-height: 100vh;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            padding: 24px;
+                            color: #1e293b;
+                        }
+                        .card {
+                            background: rgba(255, 255, 255, 0.85);
+                            backdrop-filter: blur(20px);
+                            -webkit-backdrop-filter: blur(20px);
+                            border: 1px solid rgba(255, 255, 255, 0.7);
+                            border-radius: 36px;
+                            padding: 48px 32px;
+                            max-width: 480px;
+                            width: 100%;
+                            text-align: center;
+                            box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.08);
+                            animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+                        }
+                        @keyframes fadeIn {
+                            from { opacity: 0; transform: translateY(20px); }
+                            to { opacity: 1; transform: translateY(0); }
+                        }
+                        .icon-wrapper {
+                            width: 96px;
+                            height: 96px;
+                            background: #d1fae5;
+                            border-radius: 50%;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            margin: 0 auto 28px;
+                            position: relative;
+                            animation: scaleIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both;
+                        }
+                        @keyframes scaleIn {
+                            from { transform: scale(0); }
+                            to { transform: scale(1); }
+                        }
+                        .icon-pulse {
+                            position: absolute;
+                            width: 100%;
+                            height: 100%;
+                            border-radius: 50%;
+                            background: #10b981;
+                            opacity: 0.15;
+                            animation: pulse 2s infinite;
+                        }
+                        @keyframes pulse {
+                            0% { transform: scale(0.95); opacity: 0.2; }
+                            50% { transform: scale(1.2); opacity: 0; }
+                            100% { transform: scale(0.95); opacity: 0; }
+                        }
+                        .success-svg {
+                            width: 48px;
+                            height: 48px;
+                            stroke: #059669;
+                            stroke-width: 4;
+                            stroke-linecap: round;
+                            stroke-linejoin: round;
+                            fill: none;
+                            z-index: 2;
+                        }
+                        .checkmark-path {
+                            stroke-dasharray: 100;
+                            stroke-dashoffset: 100;
+                            animation: drawCheck 0.6s cubic-bezier(0.65, 0, 0.45, 1) 0.4s forwards;
+                        }
+                        @keyframes drawCheck {
+                            to { stroke-dashoffset: 0; }
+                        }
+                        h2 {
+                            font-size: 28px;
+                            font-weight: 800;
+                            margin-bottom: 12px;
+                            background: linear-gradient(135deg, #059669 0%, #0284c7 100%);
+                            -webkit-background-clip: text;
+                            -webkit-text-fill-color: transparent;
+                        }
+                        .status-badge {
+                            display: inline-block;
+                            background: #e0f2fe;
+                            color: #0369a1;
+                            font-weight: 600;
+                            font-size: 13px;
+                            padding: 6px 14px;
+                            border-radius: 100px;
+                            margin-bottom: 24px;
+                        }
+                        p {
+                            font-size: 15px;
+                            line-height: 1.6;
+                            color: #64748b;
+                            margin-bottom: 32px;
+                        }
+                        .highlight {
+                            color: #0284c7;
+                            font-weight: 600;
+                        }
+                        .btn {
+                            display: inline-flex;
+                            align-items: center;
+                            justify-content: center;
+                            width: 100%;
+                            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+                            color: white;
+                            border: none;
+                            padding: 16px 28px;
+                            border-radius: 18px;
+                            font-weight: 600;
+                            font-size: 16px;
+                            cursor: pointer;
+                            box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
+                            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+                        }
+                        .btn:hover {
+                            transform: translateY(-2px);
+                            box-shadow: 0 12px 20px -3px rgba(37, 99, 235, 0.4);
+                            filter: brightness(1.05);
+                        }
+                        .btn:active {
+                            transform: translateY(1px);
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="card">
+                        <div class="icon-wrapper">
+                            <div class="icon-pulse"></div>
+                            <svg class="success-svg" viewBox="0 0 24 24">
+                                <path class="checkmark-path" d="M20 6L9 17L4 12" />
+                            </svg>
+                        </div>
+                        <h2>支付处理成功</h2>
+                        <span class="status-badge">Blockchain Verified</span>
+                        <p>交易已在区块链上安全归档记账。<br>系统检测到您已在浏览器中完成操作。如果您正在使用 <span class="highlight">智能监护系统客户端</span>，现在可以关闭此浏览器窗口并直接返回客户端查看结果。</p>
+                        <button class="btn" onclick="closeWindow()">关闭当前窗口</button>
+                    </div>
+                    <script>
+                        function closeWindow() {
+                            if (window.opener) {
+                                window.opener.postMessage('alipay-success', '*');
+                            }
+                            window.close();
+                        }
+                        setTimeout(closeWindow, 3000);
+                    </script>
+                </body>
+                </html>
+            `);
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        console.error("Alipay return error:", error);
+        res.status(500).send(`<h3>支付处理失败: ${error.message}</h3>`);
+    }
 });
 
 paymentService.generateSeedData();

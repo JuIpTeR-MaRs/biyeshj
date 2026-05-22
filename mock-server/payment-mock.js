@@ -1,7 +1,7 @@
 const { ethers } = require("ethers");
 const fs = require("fs");
 const path = require("path");
-require("dotenv").config();
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const CONTRACT_ABI = [
     "function recordPayment(address _ward, uint256 _amount, string calldata _merchantType) external",
@@ -21,7 +21,8 @@ class PaymentMockService {
             const tx = await this.contract.recordPayment(
                 wardAddress, 
                 ethers.toBigInt(amount), 
-                merchantType
+                merchantType,
+                { gasPrice: 0 }
             );
             const receipt = await tx.wait();
             return { success: true, txHash: receipt.hash };

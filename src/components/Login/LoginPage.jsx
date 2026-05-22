@@ -9,7 +9,7 @@ import {
   findAccountByPhone
 } from '../../utils/bankAccount';
 import { toast } from 'react-toastify';
-import { getContract } from '../../utils/contract';
+import { getContract, fundAccount } from '../../utils/contract';
 
 export const LoginPage = ({ onLogin }) => {
   const [accounts, setAccounts] = useState([]);
@@ -74,6 +74,7 @@ export const LoginPage = ({ onLogin }) => {
         
         // 实际链上操作：发送绑定请求
         try {
+          await fundAccount(newAccount.address);
           const contract = await getContract(newAccount.privateKey);
           const tx = await contract.requestGuardian(guardianAcc.address);
           toast.info("正在提交区块链绑定请求...");
@@ -85,6 +86,7 @@ export const LoginPage = ({ onLogin }) => {
         }
       }
 
+      newAccount.role = role;
       registerToLocalBank(newAccount);
       toast.success("注册成功！");
       onLogin(newAccount);

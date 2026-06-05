@@ -132,6 +132,27 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice 监护人设置被监护人的消费阈值
+     * @param _ward 被监护人地址
+     * @param _amount 阈值金额
+     */
+    function setGuardianThreshold(address _ward, uint256 _amount) external {
+        require(wardToGuardian[_ward] == msg.sender, "GuardianDApp: Not the authorized guardian");
+        threshold[_ward] = _amount;
+        emit ThresholdSet(_ward, _amount);
+    }
+
+    /**
+     * @notice 管理员设置被监护人的消费阈值 (用于系统重启后恢复状态)
+     * @param _ward 被监护人地址
+     * @param _amount 阈值金额
+     */
+    function adminSetThreshold(address _ward, uint256 _amount) external onlyOwner {
+        threshold[_ward] = _amount;
+        emit ThresholdSet(_ward, _amount);
+    }
+
+    /**
      * @notice 记录支付记录（仅预言机调用）
      * @dev 若金额 <= 阈值直接标记完成，否则标记为 pending 并触发预警
      * @param _ward 被监护人地址
@@ -148,8 +169,8 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         txCounter++;
         uint256 currentThreshold = threshold[_ward];
         
-        // 核心逻辑：金额超过阈值则进入 Pending
-        bool isPending = _amount > currentThreshold;
+        // 核心逻辑：金额超过阈值，并且已经绑定了监护人，则进入 Pending
+        bool isPending = (_amount > currentThreshold) && (wardToGuardian[_ward] != address(0));
 
         transactions[txCounter] = Transaction({
             id: txCounter,

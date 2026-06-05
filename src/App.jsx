@@ -7,6 +7,7 @@ import { WalletConnect } from './components/WalletConnect';
 import { PendingList } from './components/PendingList';
 import { LoginPage } from './components/Login/LoginPage';
 import { RequestList } from './components/RequestList';
+import { HistoryList } from './components/HistoryList';
 import { getContract, CONTRACT_ADDRESS, fundAccount } from './utils/contract';
 import { getLocalBankUser } from './utils/bankAccount';
 
@@ -22,6 +23,9 @@ function App() {
   const [guardianInfo, setGuardianInfo] = useState(null);
   const [pendingGuardianInfo, setPendingGuardianInfo] = useState(null);
   const [activeWards, setActiveWards] = useState([]);
+  const [myThreshold, setMyThreshold] = useState("0");
+  const [editingThreshold, setEditingThreshold] = useState(null);
+  const [isUpdatingThreshold, setIsUpdatingThreshold] = useState(false);
 
   // 被监护人端表单状态
   const [bindPhone, setBindPhone] = useState('');
@@ -37,6 +41,7 @@ function App() {
   const [alipayAmount, setAlipayAmount] = useState('');
   const [alipaySubject, setAlipaySubject] = useState('餐饮美食');
   const [isAlipayLoading, setIsAlipayLoading] = useState(false);
+  const [historyTxs, setHistoryTxs] = useState([]);
 
   // 支付宝扫码支付弹窗状态
   const [showQrModal, setShowQrModal] = useState(false);
@@ -94,11 +99,19 @@ function App() {
         try {
           const activeG = await contract.wardToGuardian(accInfo.address);
           if (activeG.toLowerCase() === account.toLowerCase()) {
-            wardsList.push(accInfo);
+            const thres = await contract.threshold(accInfo.address);
+            wardsList.push({...accInfo, threshold: thres.toString()});
           }
         } catch (e) {}
       }
       setActiveWards(wardsList);
+
+      // 获取当前用户的阈值
+      try {
+        const myThres = await contract.threshold(account);
+        setMyThreshold(myThres.toString());
+      } catch (e) {}
+
 
       // 4. 被监护人信息：查询当前用户的监护人和申请中的监护人
       let activeGuardian = "0x0000000000000000000000000000000000000000";
@@ -132,6 +145,48 @@ function App() {
       const currentUser = getLocalBankUser() || {};
       const isGuardian = isGuardianOnChain || currentUser.role === 'guardian';
       setRole(isGuardian ? 'guardian' : 'ward');
+
+      // 6. 获取历史消费记录
+      const txCount = await contract.txCounter();
+      const count = Number(txCount);
+      const allTxs = [];
+      for (let i = 1; i <= count; i++) {
+        try {
+          const tx = await contract.transactions(i);
+          allTxs.push({
+            id: tx[0].toString(),
+            ward: tx[1],
+            amount: tx[2].toString(),
+            timestamp: Number(tx[3]),
+            merchantType: tx[4],
+            isPending: tx[5],
+            isApproved: tx[6]
+          });
+        } catch (e) {
+          console.error("Error fetching transaction history:", i, e);
+        }
+      }
+
+      const currentRole = isGuardian ? 'guardian' : 'ward';
+      let filteredTxs = [];
+      if (currentRole === 'ward') {
+        filteredTxs = allTxs.filter(tx => tx.ward.toLowerCase() === account.toLowerCase());
+      } else {
+        const wardAddresses = wardsList.map(w => w.address.toLowerCase());
+        filteredTxs = allTxs.filter(tx => wardAddresses.includes(tx.ward.toLowerCase()));
+      }
+
+      // 关联被监护人姓名
+      const mappedTxs = filteredTxs.map(tx => {
+        const info = allAccounts.find(a => a.address.toLowerCase() === tx.ward.toLowerCase());
+        return {
+          ...tx,
+          wardName: info ? info.accountName : tx.ward
+        };
+      });
+
+      mappedTxs.sort((a, b) => b.timestamp - a.timestamp);
+      setHistoryTxs(mappedTxs);
     } catch (err) {
       console.error("Fetch Data Error:", err);
     }
@@ -163,6 +218,19 @@ function App() {
       
       toast.info("正在上链同步绑定关系...");
       await tx.wait();
+
+      if (approve) {
+        try {
+          await fetch('/api/guardian/bind', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ wardAddress, guardianAddress: account })
+          });
+        } catch (err) {
+          console.error("写入数据库失败:", err);
+        }
+      }
+
       toast.success(approve ? "已成功绑定监护关系" : "已拒绝绑定请求");
       fetchData();
     } catch (err) {
@@ -251,6 +319,16 @@ function App() {
       const tx2 = await guardianContract.acceptGuardianship(wardAcc.address);
       await tx2.wait();
 
+      try {
+        await fetch('/api/guardian/bind', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wardAddress: wardAcc.address, guardianAddress: account })
+        });
+      } catch (err) {
+        console.error("写入数据库失败:", err);
+      }
+
       toast.success(`已成功添加并绑定被监护人 ${wardAcc.accountName}！`);
       setWardPhoneInput('');
       setShowAddWardForm(false);
@@ -263,7 +341,41 @@ function App() {
     }
   };
 
-  const handleCloseQrModal = useCallback(() => {
+  // 监护人修改被监护人的消费阈值
+  const handleUpdateThreshold = async (wardAddress, newThreshold) => {
+    if (!newThreshold || isNaN(newThreshold) || parseFloat(newThreshold) < 0) {
+      toast.error("请输入有效的阈值金额");
+      return;
+    }
+    setIsUpdatingThreshold(true);
+    try {
+      const contract = await getContract();
+      const tx = await contract.setGuardianThreshold(wardAddress, newThreshold);
+      toast.info("正在提交修改阈值请求...");
+      await tx.wait();
+
+      try {
+        await fetch('/api/guardian/threshold', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wardAddress, amount: newThreshold })
+        });
+      } catch (err) {
+        console.error("写入数据库失败:", err);
+      }
+
+      toast.success("已成功修改被监护人的消费阈值");
+      setEditingThreshold(null);
+      fetchData();
+    } catch (err) {
+      console.error(err);
+      toast.error(err.reason || "修改阈值失败");
+    } finally {
+      setIsUpdatingThreshold(false);
+    }
+  };
+
+  const handleCloseQrModal = useCallback(async () => {
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
@@ -273,7 +385,20 @@ function App() {
       countdownIntervalRef.current = null;
     }
     setShowQrModal(false);
-  }, []);
+
+    // 发送取消订单请求到后台，防止后台或兜底模式自动录入成功
+    if (qrOutTradeNo) {
+      try {
+        await fetch("/api/alipay/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ outTradeNo: qrOutTradeNo })
+        });
+      } catch (err) {
+        console.error("Cancel trade failed:", err);
+      }
+    }
+  }, [qrOutTradeNo]);
 
   const startPolling = useCallback((outTradeNo) => {
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
@@ -415,14 +540,14 @@ function App() {
         const curActiveWards = activeWardsRef.current;
 
         if (curAccount && ward.toLowerCase() === curAccount.toLowerCase()) {
-          toast.warn(`⚠️ 支付已完成，已超出消费阈值（${amount.toString()} Wei），等待监护人审批！`, {
+          toast.warn(`⚠️ 支付已完成，已超出消费阈值（${amount.toString()} 元），等待监护人审批！`, {
             position: "top-right",
             autoClose: 5000,
             theme: "colored"
           });
           fetchData();
         } else if (curRole === 'guardian' && curActiveWards.some(w => w.address.toLowerCase() === ward.toLowerCase())) {
-          toast.warn(`⚠️ 收到被监护成员大额消费预警: ${amount.toString()} Wei`, {
+          toast.warn(`⚠️ 收到被监护成员大额消费预警: ${amount.toString()} 元`, {
             position: "top-right",
             autoClose: 5000,
             theme: "colored"
@@ -444,7 +569,7 @@ function App() {
           });
           fetchData();
         } else if (curRole === 'guardian' && curActiveWards.some(w => w.address.toLowerCase() === ward.toLowerCase())) {
-          toast.info(`ℹ️ 被监护成员完成一笔自动允许的消费: ${amount.toString()} Wei`, {
+          toast.info(`ℹ️ 被监护成员完成一笔自动允许的消费: ${amount.toString()} 元`, {
             position: "top-right",
             autoClose: 5000
           });
@@ -593,10 +718,39 @@ function App() {
                               <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 flex-shrink-0">
                                 <User className="w-5 h-5" />
                               </div>
-                              <div className="overflow-hidden">
+                              <div className="overflow-hidden flex-1">
                                 <p className="text-slate-800 font-bold text-sm truncate">{ward.accountName}</p>
                                 <p className="text-slate-500 text-[10px] font-mono leading-none mb-1">{ward.phone}</p>
                                 <p className="text-slate-400 text-[9px] font-mono truncate">{ward.address}</p>
+                                <p className="text-indigo-600 text-[11px] font-bold mt-1">当前消费阈值: {ward.threshold} 元</p>
+                              </div>
+                              <div className="flex flex-col space-y-2 flex-shrink-0">
+                                {editingThreshold?.address === ward.address ? (
+                                  <div className="flex items-center space-x-2">
+                                    <input 
+                                      type="number" 
+                                      className="w-20 border border-slate-200 rounded px-2 py-1 text-xs" 
+                                      value={editingThreshold.amount}
+                                      onChange={e => setEditingThreshold({...editingThreshold, amount: e.target.value})}
+                                    />
+                                    <button 
+                                      onClick={() => handleUpdateThreshold(ward.address, editingThreshold.amount)}
+                                      disabled={isUpdatingThreshold}
+                                      className="bg-indigo-500 hover:bg-indigo-600 text-white px-2 py-1 rounded text-xs transition-colors"
+                                    >保存</button>
+                                    <button 
+                                      onClick={() => setEditingThreshold(null)}
+                                      className="bg-slate-200 hover:bg-slate-300 text-slate-600 px-2 py-1 rounded text-xs transition-colors"
+                                    >取消</button>
+                                  </div>
+                                ) : (
+                                  <button 
+                                    onClick={() => setEditingThreshold({ address: ward.address, amount: ward.threshold })}
+                                    className="px-3 py-1.5 border border-indigo-200 hover:bg-indigo-50 text-indigo-600 rounded-xl text-xs font-bold transition-all"
+                                  >
+                                    修改阈值
+                                  </button>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -614,13 +768,77 @@ function App() {
 
                     <RequestList requests={pendingRequests} onAction={handleRequestAction} loading={loading} />
                     <PendingList txs={pendingTxs} onAction={handleAction} loading={loading} />
+
+                    {/* 模拟支付宝交易测试 */}
+                    <div className="bg-slate-50 border border-slate-200/60 rounded-[32px] p-8 shadow-sm">
+                      <h4 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
+                        <span className="text-xl">🛒</span>
+                        <span>模拟支付宝交易测试</span>
+                      </h4>
+                      <p className="text-slate-500 text-xs mb-6">
+                        输入商品类型和金额，点击立即支付将唤起支付宝沙箱收银台进行支付体验。支付成功后，预言机将自动把交易数据记录上链。
+                      </p>
+
+                      <form onSubmit={handleAlipayPay} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">商品类型 (上链类别)</label>
+                            <select
+                              value={alipaySubject}
+                              onChange={(e) => setAlipaySubject(e.target.value)}
+                              className="w-full bg-white border border-slate-200 focus:border-blue-500/50 rounded-xl py-3 px-4 text-slate-700 text-sm outline-none transition-all duration-300"
+                            >
+                              <option value="餐饮美食">餐饮美食 (FOOD)</option>
+                              <option value="医疗健康">医疗健康 (HLTH)</option>
+                              <option value="娱乐购物">娱乐购物 (SHOP)</option>
+                              <option value="交通出行">交通出行 (TRAV)</option>
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">支付金额 (元 / Wei 1:1)</label>
+                            <input
+                              type="number"
+                              min="1"
+                              placeholder="请输入支付金额 (例如 50)"
+                              value={alipayAmount}
+                              onChange={(e) => setAlipayAmount(e.target.value)}
+                              className="w-full bg-white border border-slate-200 focus:border-blue-500/50 rounded-xl py-3 px-4 text-slate-700 text-sm outline-none transition-all duration-300"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={isAlipayLoading}
+                          className="w-full mt-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-blue-400 disabled:to-indigo-400 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center space-x-2"
+                        >
+                          {isAlipayLoading ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                              <span>正在生成支付链接...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>💳 立即使用支付宝付款</span>
+                            </>
+                          )}
+                        </button>
+                      </form>
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-200/60 rounded-[32px] p-8 shadow-sm">
+                      <HistoryList txs={historyTxs} />
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-8">
                     <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[32px] p-10 text-white shadow-xl shadow-blue-200">
                       <h3 className="text-2xl font-bold mb-4">您的钱包已受保护</h3>
                       <p className="text-blue-100 leading-relaxed mb-8 opacity-90">
-                        系统正在实时监控您的支出。任何超过预设阈值的消费都将由您的监护人进行二次确认。
+                        {guardianInfo 
+                          ? "系统正在实时监控您的支出。任何超过预设阈值的消费都将由您的监护人进行二次确认。" 
+                          : "系统区块链网络已连接。请尽快绑定监护人以开启智能消费预警和审批功能。"}
                       </p>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10">
@@ -631,6 +849,12 @@ function App() {
                           <p className="text-xs font-bold text-blue-200 uppercase tracking-wider mb-1">智能合约</p>
                           <p className="text-lg font-bold">已验证</p>
                         </div>
+                        {guardianInfo && (
+                          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 col-span-2">
+                            <p className="text-xs font-bold text-blue-200 uppercase tracking-wider mb-1">当前消费阈值 (超出需审批)</p>
+                            <p className="text-lg font-bold">{myThreshold} 元</p>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -796,6 +1020,10 @@ function App() {
                         </button>
                       </form>
                     </div>
+                    
+                    <div className="bg-slate-50 border border-slate-200/60 rounded-[32px] p-8 shadow-sm">
+                      <HistoryList txs={historyTxs} />
+                    </div>
                   </div>
                 )}
               </div>
@@ -815,7 +1043,6 @@ function App() {
           {/* 背景遮罩 */}
           <div 
             className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
-            onClick={handleCloseQrModal}
           ></div>
           
           {/* 模态框卡片 */}

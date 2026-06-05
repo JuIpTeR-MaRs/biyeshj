@@ -16,7 +16,7 @@ export const WalletConnect = ({ account, onLogout }) => {
           <span className="font-black text-lg">B</span>
         </div>
         <h1 className="text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-blue-600">
-          智能银行后台
+          消费监测系统
         </h1>
       </div>
       

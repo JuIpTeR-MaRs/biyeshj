@@ -13,8 +13,11 @@ export const CONTRACT_ABI = [
   "function requestGuardian(address _guardian) external",
   "function acceptGuardianship(address _ward) external",
   "function rejectGuardianship(address _ward) external",
+  "function setGuardianThreshold(address _ward, uint256 _amount) external",
+  "function setThreshold(uint256 _amount) external",
   "function getPendingTransactions(address _guardian) view returns (uint256[] memory)",
-  "event PaymentPendingApproval(uint256 indexed txId, address indexed ward, uint256 amount)"
+  "event PaymentPendingApproval(uint256 indexed txId, address indexed ward, uint256 amount)",
+  "event ThresholdSet(address indexed ward, uint256 amount)"
 ];
 
 /**

@@ -69,4 +69,56 @@ describe("GuardianDApp Contract", function () {
       ).to.be.revertedWith("GuardianDApp: Not the authorized guardian");
     });
   });
+
+  describe("Blacklist & Risk Control", function () {
+    beforeEach(async function () {
+      await dapp.connect(oracle).bindGuardian(ward.address, guardian.address);
+      await dapp.connect(ward).setThreshold(1000);
+    });
+
+    it("Should allow guardian or owner to set blacklisted merchant", async function () {
+      // Owner (oracle) sets it
+      await dapp.connect(oracle).setBannedMerchant("Gambling", true);
+      expect(await dapp.bannedMerchants("Gambling")).to.be.true;
+
+      // Guardian sets it
+      await dapp.connect(guardian).setBannedMerchant("Alcohol", true);
+      expect(await dapp.bannedMerchants("Alcohol")).to.be.true;
+    });
+
+    it("Should fail if normal ward sets blacklisted merchant", async function () {
+      await expect(
+        dapp.connect(ward).setBannedMerchant("Gambling", true)
+      ).to.be.revertedWith("GuardianDApp: Only owner or guardian can set banned merchants");
+    });
+
+    it("Should intercept blacklisted merchant payment even if under threshold", async function () {
+      await dapp.connect(oracle).setBannedMerchant("Gaming", true);
+      // 500 is under 1000 threshold, but "Gaming" is blacklisted
+      await dapp.connect(oracle).recordPayment(ward.address, 500, "Gaming");
+      const tx = await dapp.transactions(1);
+      expect(tx.isPending).to.be.true;
+      expect(tx.isApproved).to.be.false;
+    });
+  });
+
+  describe("AI Report Integrity Storage", function () {
+    it("Should allow owner to store report hash and read it back", async function () {
+      const reportHash = ethers.keccak256(ethers.toUtf8Bytes("AI diagnosis report text content"));
+      const month = "2026-06";
+
+      await dapp.connect(oracle).storeAiReportHash(ward.address, month, reportHash);
+      const storedHash = await dapp.aiReportHashes(ward.address, month);
+      expect(storedHash).to.equal(reportHash);
+    });
+
+    it("Should fail if non-owner tries to store report hash", async function () {
+      const reportHash = ethers.keccak256(ethers.toUtf8Bytes("AI diagnosis report text content"));
+      const month = "2026-06";
+
+      await expect(
+        dapp.connect(ward).storeAiReportHash(ward.address, month, reportHash)
+      ).to.be.revertedWithCustomError(dapp, "OwnableUnauthorizedAccount");
+    });
+  });
 });

@@ -1,4 +1,5 @@
 const express = require("express");
+const { ethers } = require("ethers");
 const paymentService = require("./payment-mock");
 require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 
@@ -87,10 +88,43 @@ const realTradesBackup = new Map(); // Backup amounts for query fallback
 app.post("/api/alipay/pay", async (req, res) => {
     const { amount, subject, wardAddress } = req.body;
     console.log(`💳 [Alipay] Precreating order for ward ${wardAddress}, amount: ${amount} Wei, category: ${subject}`);
-    const code = categoryCodes[subject] || "SHOP";
-    const outTradeNo = `${wardAddress.replace(/^0x/, "")}_${code}_${Date.now()}`;
-
+    
     try {
+        // --- 智能合约风控规则引擎前置校验 ---
+        const contract = paymentService.contract;
+        const guardian = await contract.wardToGuardian(wardAddress);
+        const hasGuardian = guardian !== ethers.ZeroAddress;
+        
+        // 1. 检查商户是否在黑名单中
+        const isBanned = await contract.bannedMerchants(subject);
+        
+        // 2. 检查交易金额是否超过设定的限额阈值
+        const currentThreshold = await contract.threshold(wardAddress);
+        const isOverThreshold = BigInt(amount) > currentThreshold;
+
+        // 如果已绑定监护人且（触发黑名单或超额），则直接前置风控拦截
+        if (hasGuardian && (isBanned || isOverThreshold)) {
+            console.log(`⚠️ [Risk Control] Intercepted! Merchant: ${subject} (${isBanned ? "Banned" : "Active"}), Amount: ${amount} (Threshold: ${currentThreshold}). Recording on-chain...`);
+            
+            // 直接在链上记账为 Pending 待审批，无需通过支付宝
+            const recordResult = await paymentService.recordOnChain(wardAddress, amount, subject);
+            
+            if (recordResult.success) {
+                return res.json({ 
+                    success: false, 
+                    riskIntercepted: true, 
+                    message: isBanned 
+                        ? `交易已被前置风险控制引擎拦截！商户类别 [${subject}] 属于限支黑名单。已提交至监护人进行链上审批。`
+                        : `交易已被前置风险控制引擎拦截！金额 [${amount} 元/Wei] 超过设定的单笔消费预警阈值 [${currentThreshold} 元/Wei]。已提交至监护人进行链上审批。`,
+                    txHash: recordResult.txHash
+                });
+            } else {
+                return res.status(500).json({ success: false, error: `风控拦截链上记账失败: ${recordResult.error}` });
+            }
+        }
+        
+        const code = categoryCodes[subject] || "SHOP";
+        const outTradeNo = `${wardAddress.replace(/^0x/, "")}_${code}_${Date.now()}`;
         const result = await alipaySdk.exec('alipay.trade.precreate', {
             bizContent: {
                 outTradeNo: outTradeNo,
@@ -704,7 +738,63 @@ app.post("/api/analysis/consumption", async (req, res) => {
         const data = await response.json();
         if (data.choices && data.choices[0] && data.choices[0].message) {
             const analysisText = data.choices[0].message.content;
-            res.json({ success: true, analysis: analysisText });
+            
+            // --- AI 诊断报告“哈希上链防篡改”逻辑 ---
+            let wardAddress = "";
+            for (const t of txs) {
+                const addr = t.ward || t.ward_address;
+                if (addr && addr !== "未知") {
+                    wardAddress = addr;
+                    break;
+                }
+            }
+
+            let reportHash = "";
+            let onChainTxHash = null;
+            const month = new Date().toISOString().slice(0, 7); // 格式：YYYY-MM
+
+            if (wardAddress && wardAddress.startsWith("0x")) {
+                const crypto = require("crypto");
+                // 1. 使用 crypto 计算报告正文的 SHA-256 哈希值
+                reportHash = "0x" + crypto.createHash("sha256").update(analysisText).digest("hex");
+                console.log(`📝 [AI Proof-of-Integrity] Report SHA-256 hash: ${reportHash} for ward ${wardAddress} (${month})`);
+
+                try {
+                    // 2. 调用合约 storeAiReportHash 存证上链
+                    const tx = await paymentService.contract.storeAiReportHash(
+                        wardAddress,
+                        month,
+                        reportHash,
+                        { gasPrice: 0 }
+                    );
+                    const receipt = await tx.wait();
+                    onChainTxHash = receipt.hash;
+                    console.log(`✅ [AI Proof-of-Integrity] Hash stored on-chain. TxHash: ${onChainTxHash}`);
+                } catch (contractErr) {
+                    console.error("❌ [AI Proof-of-Integrity] Contract call failed:", contractErr.message);
+                }
+
+                // 3. 同时存入本地 MySQL 数据库进行本地备份
+                try {
+                    await paymentService.dbPool.execute(
+                        `INSERT INTO ai_reports (ward_address, month, report_content, report_hash, tx_hash) 
+                         VALUES (?, ?, ?, ?, ?) 
+                         ON DUPLICATE KEY UPDATE report_content = ?, report_hash = ?, tx_hash = ?`,
+                        [wardAddress, month, analysisText, reportHash, onChainTxHash, analysisText, reportHash, onChainTxHash]
+                    );
+                    console.log("💾 [AI Proof-of-Integrity] MySQL backup updated successfully.");
+                } catch (dbErr) {
+                    console.error("❌ [AI Proof-of-Integrity] MySQL backup failed:", dbErr.message);
+                }
+            }
+
+            res.json({ 
+                success: true, 
+                analysis: analysisText,
+                month: month,
+                reportHash: reportHash,
+                txHash: onChainTxHash
+            });
         } else {
             console.error("[AI Analysis] DeepSeek Error response:", data);
             res.status(500).json({ success: false, error: data.error?.message || "大模型返回格式错误" });

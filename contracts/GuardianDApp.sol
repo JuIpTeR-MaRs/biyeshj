@@ -44,6 +44,15 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     /// @notice 交易 ID => 交易详情
     mapping(uint256 => Transaction) public transactions;
 
+    /// @notice 商户黑名单映射
+    mapping(string => bool) public bannedMerchants;
+
+    /// @notice 活跃监护人映射 (用于权限校验)
+    mapping(address => bool) public isGuardian;
+
+    /// @notice 被监护人地址 => 月份 => AI报告哈希
+    mapping(address => mapping(string => bytes32)) public aiReportHashes;
+
     // --- 事件 ---
 
     event PaymentAutoApproved(uint256 indexed txId, address indexed ward, uint256 amount);
@@ -55,6 +64,8 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     event GuardianshipRequested(address indexed ward, address indexed guardian);
     event GuardianshipAccepted(address indexed ward, address indexed guardian);
     event GuardianshipRejected(address indexed ward, address indexed guardian);
+    event BannedMerchantSet(string merchantType, bool banned);
+    event AiReportHashStored(address indexed ward, string month, bytes32 reportHash);
 
     // --- 修饰符 ---
 
@@ -97,6 +108,7 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         require(pendingWardToGuardian[_ward] == msg.sender, "GuardianDApp: No pending request for you");
         
         wardToGuardian[_ward] = msg.sender;
+        isGuardian[msg.sender] = true;
         delete pendingWardToGuardian[_ward];
         
         emit GuardianshipAccepted(_ward, msg.sender);
@@ -119,6 +131,7 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
      */
     function bindGuardian(address _ward, address _guardian) external onlyOwner {
         wardToGuardian[_ward] = _guardian;
+        isGuardian[_guardian] = true;
         emit GuardianBound(_ward, _guardian);
     }
 
@@ -169,8 +182,9 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         txCounter++;
         uint256 currentThreshold = threshold[_ward];
         
-        // 核心逻辑：金额超过阈值，并且已经绑定了监护人，则进入 Pending
-        bool isPending = (_amount > currentThreshold) && (wardToGuardian[_ward] != address(0));
+        // 核心逻辑：商户黑名单拦截，或者金额超过阈值，并且已经绑定了监护人，则进入 Pending
+        bool isBanned = bannedMerchants[_merchantType];
+        bool isPending = (isBanned || (_amount > currentThreshold)) && (wardToGuardian[_ward] != address(0));
 
         transactions[txCounter] = Transaction({
             id: txCounter,
@@ -187,6 +201,32 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         } else {
             emit PaymentAutoApproved(txCounter, _ward, _amount);
         }
+    }
+
+    /**
+     * @notice 设置商户黑名单
+     * @param _merchantType 商户类型
+     * @param _banned 是否加入黑名单
+     */
+    function setBannedMerchant(string calldata _merchantType, bool _banned) external {
+        require(msg.sender == owner() || isGuardian[msg.sender], "GuardianDApp: Only owner or guardian can set banned merchants");
+        bannedMerchants[_merchantType] = _banned;
+        emit BannedMerchantSet(_merchantType, _banned);
+    }
+
+    /**
+     * @notice 存储 AI 报告的 SHA-256 哈希值
+     * @param _ward 被监护人地址
+     * @param _month 月份，例如 "2026-06"
+     * @param _reportHash 报告内容的 SHA-256 哈希值
+     */
+    function storeAiReportHash(address _ward, string calldata _month, bytes32 _reportHash) external onlyOwner {
+        require(_ward != address(0), "GuardianDApp: Invalid ward address");
+        require(bytes(_month).length > 0, "GuardianDApp: Month required");
+        require(_reportHash != bytes32(0), "GuardianDApp: Hash required");
+
+        aiReportHashes[_ward][_month] = _reportHash;
+        emit AiReportHashStored(_ward, _month, _reportHash);
     }
 
     /**

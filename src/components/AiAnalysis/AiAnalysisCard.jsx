@@ -6,6 +6,9 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [error, setError] = useState('');
+  const [reportHash, setReportHash] = useState('');
+  const [txHash, setTxHash] = useState('');
+  const [verificationResult, setVerificationResult] = useState(null); // 'valid', 'invalid', 'not_found', 'loading', null
 
   const isAdmin = role === 'admin';
 
@@ -28,11 +31,63 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
     return () => clearInterval(interval);
   }, [loading]);
 
+  const calculateSHA256 = async (text) => {
+    const msgUint8 = new TextEncoder().encode(text);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return '0x' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const handleVerifyIntegrity = async () => {
+    if (!analysis) return;
+    setVerificationResult('loading');
+    
+    try {
+      // 1. 寻找被监护人钱包地址
+      let wardAddress = "";
+      for (const t of txs) {
+        const addr = t.ward || t.ward_address;
+        if (addr && addr !== "未知") {
+          wardAddress = addr;
+          break;
+        }
+      }
+
+      if (!wardAddress) {
+        throw new Error("未找到关联的被监护人钱包地址");
+      }
+
+      // 2. 计算本地报告内容哈希值
+      const localHash = await calculateSHA256(analysis);
+      
+      // 3. 从智能合约中读取链上哈希存证
+      const { getContract } = await import('../../utils/contract');
+      const contract = await getContract();
+      const month = new Date().toISOString().slice(0, 7);
+      const onChainHash = await contract.aiReportHashes(wardAddress, month);
+
+      console.log("Local SHA-256 Hash:", localHash);
+      console.log("On-chain SHA-256 Hash:", onChainHash);
+
+      if (onChainHash === '0x0000000000000000000000000000000000000000000000000000000000000000' || !onChainHash) {
+        setVerificationResult('not_found');
+      } else if (onChainHash.toLowerCase() === localHash.toLowerCase()) {
+        setVerificationResult('valid');
+      } else {
+        setVerificationResult('invalid');
+      }
+    } catch (err) {
+      console.error(err);
+      setVerificationResult('error');
+    }
+  };
+
   const handleTriggerAnalysis = async () => {
     if (txs.length === 0) return;
     setLoading(true);
     setError('');
     setAnalysis('');
+    setVerificationResult(null);
 
     try {
       const response = await fetch('/api/analysis/consumption', {
@@ -43,6 +98,8 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
       const data = await response.json();
       if (data.success) {
         setAnalysis(data.analysis);
+        setReportHash(data.reportHash || '');
+        setTxHash(data.txHash || '');
       } else {
         setError(data.error || "获取AI分析报告失败");
       }
@@ -262,6 +319,65 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
               <Sparkles className="w-4 h-4" />
               <span>{role === 'admin' ? "开始 AI 审计全网数据" : "✨ 立即生成 AI 诊断报告"}</span>
             </button>
+          </div>
+        )}
+
+        {analysis && !loading && (
+          <div className={`mt-5 p-4 rounded-2xl border transition-all ${
+            verificationResult === 'valid' 
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700'
+              : verificationResult === 'invalid'
+                ? 'bg-rose-500/10 border-rose-500/30 text-rose-700'
+                : verificationResult === 'not_found'
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-700'
+                  : isAdmin
+                    ? 'bg-slate-800/80 border-slate-700 text-slate-300'
+                    : 'bg-slate-50 border-slate-200 text-slate-600'
+          }`}>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-left">
+              <div>
+                <p className="text-xs font-black flex items-center gap-1.5">
+                  <span>🛡️ AI 诊断报告链上存证校验 (SHA-256)</span>
+                </p>
+                {reportHash && (
+                  <p className="text-[10px] font-mono text-slate-400 mt-1 truncate max-w-[280px] sm:max-w-[360px]">
+                    本地计算哈希: {reportHash}
+                  </p>
+                )}
+                {txHash && (
+                  <p className="text-[10px] font-mono text-slate-400 truncate max-w-[280px] sm:max-w-[360px]">
+                    存证交易哈希: {txHash}
+                  </p>
+                )}
+              </div>
+              <div className="flex-shrink-0">
+                {verificationResult === 'loading' ? (
+                  <button disabled className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-200 text-slate-400 flex items-center space-x-1">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>正在比对...</span>
+                  </button>
+                ) : verificationResult === 'valid' ? (
+                  <div className="flex items-center space-x-1 text-emerald-600 font-extrabold text-xs bg-emerald-500/20 px-3 py-1.5 rounded-xl">
+                    <span>✅ 数据未被篡改 (完全一致)</span>
+                  </div>
+                ) : verificationResult === 'invalid' ? (
+                  <div className="flex items-center space-x-1 text-rose-600 font-extrabold text-xs bg-rose-500/20 px-3 py-1.5 rounded-xl">
+                    <span>❌ 报告数据已被篡改！</span>
+                  </div>
+                ) : verificationResult === 'not_found' ? (
+                  <div className="flex items-center space-x-1 text-amber-600 font-extrabold text-xs bg-amber-500/20 px-3 py-1.5 rounded-xl">
+                    <span>⚠️ 未在链上找到报告存证</span>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={handleVerifyIntegrity}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/10"
+                  >
+                    验证防篡改
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>

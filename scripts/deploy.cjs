@@ -28,7 +28,7 @@ async function main() {
   if (fs.existsSync(envPath)) {
     const existingContent = fs.readFileSync(envPath, "utf8");
     const preservedLines = existingContent.split("\n").filter(line => 
-      line.trim().startsWith("ALIPAY_") || line.trim().startsWith("DB_")
+      line.trim().startsWith("ALIPAY_") || line.trim().startsWith("DB_") || line.trim().startsWith("DEEPSEEK_")
     );
     if (preservedLines.length > 0) {
       preserveContent = "\n\n" + preservedLines.join("\n");

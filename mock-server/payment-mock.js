@@ -6,7 +6,11 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const CONTRACT_ABI = [
     "function recordPayment(address _ward, uint256 _amount, string calldata _merchantType) external",
-    "function txCounter() view returns (uint256)"
+    "function txCounter() view returns (uint256)",
+    "function bannedMerchants(string) view returns (bool)",
+    "function threshold(address) view returns (uint256)",
+    "function wardToGuardian(address) view returns (address)",
+    "function storeAiReportHash(address _ward, string _month, bytes32 _reportHash) external"
 ];
 
 class PaymentMockService {
@@ -25,6 +29,30 @@ class PaymentMockService {
             connectionLimit: 10,
             queueLimit: 0
         });
+
+        // 异步初始化数据库表
+        this.initDatabase();
+    }
+
+    async initDatabase() {
+        try {
+            await this.dbPool.execute(`
+                CREATE TABLE IF NOT EXISTS \`ai_reports\` (
+                  \`id\` bigint(20) NOT NULL AUTO_INCREMENT,
+                  \`ward_address\` varchar(42) NOT NULL COMMENT '被监护人地址',
+                  \`month\` varchar(7) NOT NULL COMMENT '月份 YYYY-MM',
+                  \`report_content\` longtext NOT NULL COMMENT '报告正文 Markdown',
+                  \`report_hash\` varchar(66) NOT NULL COMMENT '报告 SHA-256 哈希值',
+                  \`tx_hash\` varchar(66) DEFAULT NULL COMMENT '存证链上交易哈希',
+                  \`created_at\` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY (\`id\`),
+                  UNIQUE KEY \`uk_ward_month\` (\`ward_address\`, \`month\`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI诊断报告本地存储与哈希对照表';
+            `);
+            console.log("📁 [MySQL] ai_reports table verified/created successfully.");
+        } catch (dbError) {
+            console.error("❌ [MySQL] Failed to initialize ai_reports table:", dbError.message);
+        }
     }
 
     async recordOnChain(wardAddress, amount, merchantType) {

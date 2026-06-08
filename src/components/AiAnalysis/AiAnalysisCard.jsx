@@ -1,0 +1,275 @@
+import React, { useState, useEffect } from 'react';
+import { Sparkles, Loader2, RefreshCw, AlertCircle, FileText } from 'lucide-react';
+
+export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
+  const [analysis, setAnalysis] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0);
+  const [error, setError] = useState('');
+
+  const isAdmin = role === 'admin';
+
+  const steps = [
+    "正在梳理平台账目数据...",
+    "正在对比阈值规则安全度...",
+    "正在通过大模型进行多维分析...",
+    "正在整理专业财务与风控意见..."
+  ];
+
+  useEffect(() => {
+    let interval;
+    if (loading) {
+      interval = setInterval(() => {
+        setLoadingStep(prev => (prev + 1) % steps.length);
+      }, 2500);
+    } else {
+      setLoadingStep(0);
+    }
+    return () => clearInterval(interval);
+  }, [loading]);
+
+  const handleTriggerAnalysis = async () => {
+    if (txs.length === 0) return;
+    setLoading(true);
+    setError('');
+    setAnalysis('');
+
+    try {
+      const response = await fetch('/api/analysis/consumption', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txs, role })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setAnalysis(data.analysis);
+      } else {
+        setError(data.error || "获取AI分析报告失败");
+      }
+    } catch (err) {
+      setError("网络错误，无法连接至AI分析服务");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 极简的 Markdown 渲染解析器
+  const renderMarkdown = (text) => {
+    if (!text) return null;
+
+    return text.split('\n').map((line, idx) => {
+      let trimmed = line.trim();
+      
+      // 标题 3 (###)
+      if (trimmed.startsWith('###')) {
+        return (
+          <h4 key={idx} className={`text-base font-extrabold mt-4 mb-2 flex items-center space-x-1.5 ${
+            isAdmin ? 'text-purple-300' : 'text-slate-800'
+          }`}>
+            <span className="w-1.5 h-4 bg-indigo-500 rounded-full"></span>
+            <span>{trimmed.replace(/^###\s*/, '')}</span>
+          </h4>
+        );
+      }
+
+      // 标题 2 (##)
+      if (trimmed.startsWith('##')) {
+        return (
+          <h3 key={idx} className={`text-lg font-black mt-5 mb-3 border-b pb-1 ${
+            isAdmin ? 'text-purple-200 border-slate-700/50' : 'text-slate-900 border-slate-100'
+          }`}>
+            {trimmed.replace(/^##\s*/, '')}
+          </h3>
+        );
+      }
+
+      // 无序列表项目 (- or *)
+      if (trimmed.startsWith('-') || trimmed.startsWith('*')) {
+        const content = trimmed.replace(/^[-*]\s*/, '');
+        return (
+          <li key={idx} className="ml-4 list-disc pl-1 py-0.5 leading-relaxed text-sm">
+            {parseBold(content)}
+          </li>
+        );
+      }
+
+      // 有序列表项目 (e.g. 1.)
+      if (/^\d+\.\s+/.test(trimmed)) {
+        const content = trimmed.replace(/^\d+\.\s+/, '');
+        const match = trimmed.match(/^(\d+)\.\s+/);
+        return (
+          <div key={idx} className="flex items-start space-x-2 my-1 leading-relaxed text-sm">
+            <span className={`font-black text-xs px-1.5 py-0.5 rounded ${
+              isAdmin ? 'bg-purple-900/40 text-purple-400' : 'bg-indigo-50 text-indigo-600'
+            }`}>{match[1]}</span>
+            <span className="flex-1">{parseBold(content)}</span>
+          </div>
+        );
+      }
+
+      // 空白行
+      if (trimmed === '') {
+        return <div key={idx} className="h-2"></div>;
+      }
+
+      // 普通段落
+      return (
+        <p key={idx} className="leading-relaxed text-sm my-1.5">
+          {parseBold(trimmed)}
+        </p>
+      );
+    });
+  };
+
+  // 处理加粗的辅助函数 **text**
+  const parseBold = (text) => {
+    const parts = text.split(/\*\*([^*]+)\*\*/g);
+    return parts.map((part, index) => {
+      // 奇数索引是加粗内容
+      if (index % 2 === 1) {
+        return <strong key={index} className="font-extrabold text-indigo-500 mx-0.5">{part}</strong>;
+      }
+      return part;
+    });
+  };
+
+  return (
+    <div className={`relative overflow-hidden rounded-[32px] border transition-all duration-300 p-6 ${
+      isAdmin 
+        ? 'bg-slate-800/40 border-slate-700/60 shadow-2xl text-slate-300 hover:border-purple-500/30' 
+        : 'bg-white border-slate-200/60 shadow-md shadow-slate-100 text-slate-700 hover:border-indigo-500/20'
+    }`}>
+      {/* 霓虹流光背景挂件 */}
+      <div className={`absolute top-[-50%] right-[-30%] w-72 h-72 rounded-full blur-[100px] pointer-events-none opacity-20 transition-all ${
+        loading ? 'animate-pulse scale-110' : ''
+      } ${
+        isAdmin ? 'bg-purple-500' : 'bg-blue-400'
+      }`}></div>
+
+      {/* 标题头部 */}
+      <div className="flex items-center justify-between mb-4 border-b pb-3 border-dashed border-slate-200/50">
+        <div className="flex items-center space-x-2.5">
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-inner ${
+            isAdmin ? 'bg-purple-500/10 text-purple-400' : 'bg-indigo-50 text-indigo-600'
+          }`}>
+            <Sparkles className="w-5 h-5 animate-spin" style={{ animationDuration: '6s' }} />
+          </div>
+          <div>
+            <h4 className={`text-base font-extrabold flex items-center space-x-1.5 ${
+              isAdmin ? 'text-white' : 'text-slate-800'
+            }`}>
+              <span>AI 消费习惯智能诊断</span>
+              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                isAdmin ? 'bg-purple-900/60 text-purple-400' : 'bg-indigo-100 text-indigo-600'
+              }`}>DeepSeek Powered</span>
+            </h4>
+            <p className="text-[10px] text-slate-400 mt-0.5">利用区块链全量账单，深度画像资金风险特征</p>
+          </div>
+        </div>
+
+        {analysis && !loading && (
+          <button 
+            onClick={handleTriggerAnalysis}
+            className={`p-2 rounded-xl border flex items-center space-x-1.5 transition-all text-xs font-bold ${
+              isAdmin 
+                ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-purple-400' 
+                : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-indigo-600'
+            }`}
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>重新诊断</span>
+          </button>
+        )}
+      </div>
+
+      {/* 主面板内容区 */}
+      <div className="min-h-[120px] flex flex-col justify-center relative">
+        {loading ? (
+          /* 加载中状态 */
+          <div className="py-8 text-center flex flex-col items-center justify-center animate-in fade-in duration-300">
+            <div className="relative mb-5 flex items-center justify-center">
+              {/* 流光渐变圈 */}
+              <div className={`absolute w-16 h-16 rounded-full border-4 border-t-transparent animate-spin ${
+                isAdmin ? 'border-purple-500/30 border-t-purple-500' : 'border-indigo-500/30 border-t-indigo-600'
+              }`}></div>
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${
+                isAdmin ? 'bg-slate-800/80 text-purple-400' : 'bg-indigo-50 text-indigo-600'
+              }`}>
+                <Loader2 className="w-6 h-6 animate-spin" />
+              </div>
+            </div>
+            <p className={`text-sm font-extrabold animate-pulse ${isAdmin ? 'text-purple-300' : 'text-slate-800'}`}>
+              {steps[loadingStep]}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">大约需要数秒时间，请稍候...</p>
+          </div>
+        ) : error ? (
+          /* 出错状态 */
+          <div className="py-6 text-center flex flex-col items-center justify-center animate-in zoom-in-95 duration-300">
+            <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mb-3">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <p className="text-sm font-bold text-red-500">{error}</p>
+            <button 
+              onClick={handleTriggerAnalysis}
+              className="mt-4 px-5 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold transition-colors shadow-lg shadow-red-600/10"
+            >
+              点击重试
+            </button>
+          </div>
+        ) : analysis ? (
+          /* 分析结果展示 */
+          <div className={`max-h-[380px] overflow-y-auto pr-1.5 custom-scrollbar text-left animate-in slide-in-from-bottom-2 duration-500 ${
+            isAdmin ? 'text-slate-300' : 'text-slate-600'
+          }`}>
+            <div className="space-y-1">
+              {renderMarkdown(analysis)}
+            </div>
+          </div>
+        ) : (
+          /* 初始状态 */
+          <div className="py-8 text-center flex flex-col items-center justify-center animate-in fade-in duration-300">
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-4 ${
+              isAdmin ? 'bg-purple-500/10 text-purple-400' : 'bg-indigo-50 text-indigo-500'
+            }`}>
+              <FileText className="w-7 h-7" />
+            </div>
+            <p className={`text-sm font-bold mb-1 ${isAdmin ? 'text-white' : 'text-slate-800'}`}>
+              {txs.length === 0 
+                ? "暂无消费记录可供诊断" 
+                : role === 'admin' 
+                  ? "全网交易账目就绪，可启动 AI 平台级财务审计" 
+                  : "个人历史消费流水已同步，可进行 AI 深度诊断"
+              }
+            </p>
+            <p className="text-xs text-slate-400 max-w-xs mx-auto mb-6">
+              {txs.length === 0 
+                ? "一旦被监护人发生真实消费，预言机将自动上链，此时即可使用 AI 分析。" 
+                : "大模型将从消费频次、金额阈值分布、风控审批等多个维度自动为您生成综合报告与建议。"
+              }
+            </p>
+            <button
+              onClick={handleTriggerAnalysis}
+              disabled={txs.length === 0}
+              className={`px-8 py-3.5 rounded-2xl text-xs font-black uppercase tracking-wider transition-all duration-300 transform active:scale-95 shadow-md flex items-center space-x-2 ${
+                txs.length === 0
+                  ? 'bg-slate-700/30 text-slate-500 border border-slate-700/20 cursor-not-allowed'
+                  : isAdmin
+                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-purple-600/10 hover:shadow-purple-600/20'
+                    : 'bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white shadow-indigo-600/10 hover:shadow-indigo-600/20'
+              }`}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>{role === 'admin' ? "开始 AI 审计全网数据" : "✨ 立即生成 AI 诊断报告"}</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+      `}} />
+    </div>
+  );
+};

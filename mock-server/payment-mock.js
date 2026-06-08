@@ -86,6 +86,24 @@ class PaymentMockService {
         }
     }
 
+    async getAllAdminData() {
+        try {
+            const [transactions] = await this.dbPool.execute('SELECT * FROM transactions ORDER BY created_at DESC');
+            const [bindings] = await this.dbPool.execute('SELECT * FROM guardianship_bindings ORDER BY created_at DESC');
+            const [thresholds] = await this.dbPool.execute('SELECT * FROM user_thresholds');
+            
+            return {
+                success: true,
+                transactions,
+                bindings,
+                thresholds
+            };
+        } catch (error) {
+            console.error(`[MySQL] 获取管理员数据失败:`, error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
     generateSeedData() {
         const merchantTypes = ["餐饮美食", "医疗健康", "娱乐购物", "交通出行"];
         const wards = ["0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"];

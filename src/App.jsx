@@ -8,6 +8,8 @@ import { PendingList } from './components/PendingList';
 import { LoginPage } from './components/Login/LoginPage';
 import { RequestList } from './components/RequestList';
 import { HistoryList } from './components/HistoryList';
+import { AdminDashboard } from './components/Admin/AdminDashboard';
+import { AiAnalysisCard } from './components/AiAnalysis/AiAnalysisCard';
 import { getContract, CONTRACT_ADDRESS, fundAccount } from './utils/contract';
 import { getLocalBankUser } from './utils/bankAccount';
 
@@ -66,6 +68,10 @@ function App() {
 
   const fetchData = useCallback(async () => {
     if (!account) return;
+    if (account === 'admin') {
+      setRole('admin');
+      return;
+    }
     try {
       // 自动充值 Gas 费
       await fundAccount(account);
@@ -525,65 +531,69 @@ function App() {
   }, [account]);
 
   useEffect(() => {
-    if (account && isLoggedIn) {
-      fetchData();
-      
-      const provider = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
-      const contract = new ethers.Contract(CONTRACT_ADDRESS, [
-        "event PaymentPendingApproval(uint256 indexed txId, address indexed ward, uint256 amount)",
-        "event PaymentAutoApproved(uint256 indexed txId, address indexed ward, uint256 amount)"
-      ], provider);
-      
-      const onPending = (id, ward, amount) => {
-        const curAccount = accountRef.current;
-        const curRole = roleRef.current;
-        const curActiveWards = activeWardsRef.current;
+    let subscriptionTime = Date.now();
+    let contractInstance = null;
 
-        if (curAccount && ward.toLowerCase() === curAccount.toLowerCase()) {
-          toast.warn(`⚠️ 支付已完成，已超出消费阈值（${amount.toString()} 元），等待监护人审批！`, {
-            position: "top-right",
-            autoClose: 5000,
-            theme: "colored"
-          });
-          fetchData();
-        } else if (curRole === 'guardian' && curActiveWards.some(w => w.address.toLowerCase() === ward.toLowerCase())) {
-          toast.warn(`⚠️ 收到被监护成员大额消费预警: ${amount.toString()} 元`, {
-            position: "top-right",
-            autoClose: 5000,
-            theme: "colored"
-          });
-          fetchData();
+    const onPending = (id, ward, amount) => {
+      if (Date.now() - subscriptionTime < 2000) return; // Ignore events triggered on initial subscribe
+      const curAccount = accountRef.current;
+      const curRole = roleRef.current;
+      const curActiveWards = activeWardsRef.current;
+
+      if (curAccount && ward.toLowerCase() === curAccount.toLowerCase()) {
+        toast.info("⏳ 支付已提交，由于金额超过预设阈值，正在等待监护人审批。", {
+          position: "top-right",
+          autoClose: 5000,
+          theme: "colored"
+        });
+        fetchData();
+      } else if (curRole === 'guardian' && curActiveWards.some(w => w.address.toLowerCase() === ward.toLowerCase())) {
+        toast.warn(`⚠️ 收到被监护成员大额消费预警: ${amount.toString()} 元`, {
+          position: "top-right",
+          autoClose: 5000,
+          theme: "colored"
+        });
+        fetchData();
+      }
+    };
+
+    const onAutoApproved = (id, ward, amount) => {
+      if (Date.now() - subscriptionTime < 2000) return; // Ignore events triggered on initial subscribe
+      const curAccount = accountRef.current;
+      const curRole = roleRef.current;
+      const curActiveWards = activeWardsRef.current;
+
+      if (curAccount && ward.toLowerCase() === curAccount.toLowerCase()) {
+        // 只通过事件触发数据刷新，不弹窗，因为 postMessage 已经处理了弹窗
+        fetchData();
+      } else if (curRole === 'guardian' && curActiveWards.some(w => w.address.toLowerCase() === ward.toLowerCase())) {
+        toast.info(`ℹ️ 被监护成员完成一笔自动允许的消费: ${amount.toString()} 元`, {
+          position: "top-right",
+          autoClose: 5000
+        });
+        fetchData();
+      }
+    };
+
+    const setupListeners = async () => {
+      if (account && isLoggedIn) {
+        fetchData();
+        contractInstance = await getContract();
+        if (contractInstance) {
+          contractInstance.on("PaymentPendingApproval", onPending);
+          contractInstance.on("PaymentAutoApproved", onAutoApproved);
         }
-      };
+      }
+    };
 
-      const onAutoApproved = (id, ward, amount) => {
-        const curAccount = accountRef.current;
-        const curRole = roleRef.current;
-        const curActiveWards = activeWardsRef.current;
+    setupListeners();
 
-        if (curAccount && ward.toLowerCase() === curAccount.toLowerCase()) {
-          toast.success("🏆 支付宝支付成功，已安全记录并同步上链！", {
-            position: "top-right",
-            autoClose: 5000,
-            theme: "colored"
-          });
-          fetchData();
-        } else if (curRole === 'guardian' && curActiveWards.some(w => w.address.toLowerCase() === ward.toLowerCase())) {
-          toast.info(`ℹ️ 被监护成员完成一笔自动允许的消费: ${amount.toString()} 元`, {
-            position: "top-right",
-            autoClose: 5000
-          });
-          fetchData();
-        }
-      };
-
-      contract.on("PaymentPendingApproval", onPending);
-      contract.on("PaymentAutoApproved", onAutoApproved);
-      return () => {
-        contract.off("PaymentPendingApproval", onPending);
-        contract.off("PaymentAutoApproved", onAutoApproved);
-      };
-    }
+    return () => {
+      if (contractInstance) {
+        contractInstance.off("PaymentPendingApproval", onPending);
+        contractInstance.off("PaymentAutoApproved", onAutoApproved);
+      }
+    };
   }, [account, isLoggedIn, fetchData]);
 
   useEffect(() => {
@@ -624,6 +634,10 @@ function App() {
 
   if (!isLoggedIn) {
     return <LoginPage onLogin={connectWallet} />;
+  }
+
+  if (role === 'admin') {
+    return <AdminDashboard onLogout={handleLogout} />;
   }
 
   return (
@@ -827,6 +841,8 @@ function App() {
                       </form>
                     </div>
 
+                    <AiAnalysisCard txs={historyTxs} role={role} />
+
                     <div className="bg-slate-50 border border-slate-200/60 rounded-[32px] p-8 shadow-sm">
                       <HistoryList txs={historyTxs} />
                     </div>
@@ -1021,6 +1037,8 @@ function App() {
                       </form>
                     </div>
                     
+                    <AiAnalysisCard txs={historyTxs} role={role} />
+
                     <div className="bg-slate-50 border border-slate-200/60 rounded-[32px] p-8 shadow-sm">
                       <HistoryList txs={historyTxs} />
                     </div>

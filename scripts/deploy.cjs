@@ -47,7 +47,7 @@ async function main() {
     console.log("📝 Updated src/utils/contract.js");
   }
   
-  // Recover guardianship bindings from MySQL
+  // Recover guardianship bindings, thresholds, and transactions from MySQL
   try {
     dotenv.config({ path: envPath });
     if (process.env.DB_HOST) {
@@ -76,11 +76,24 @@ async function main() {
           console.log(`   ✅ Restored threshold: ${row.ward_address} -> ${row.threshold_amount}`);
         }
       }
+
+      const [txRows] = await db.execute("SELECT * FROM transactions ORDER BY id ASC");
+      if (txRows.length > 0) {
+        console.log(`🔄 Recovering ${txRows.length} transactions from database...`);
+        for (const row of txRows) {
+          const tx = await dapp.recordPayment(row.ward_address, Math.floor(row.amount), row.merchant_type);
+          const receipt = await tx.wait();
+          console.log(`   ✅ Restored transaction: ${row.ward_address} -> ${row.amount} Wei (New Tx Hash: ${receipt.hash})`);
+          
+          // Update the transaction hash in MySQL so they match
+          await db.execute("UPDATE transactions SET tx_hash = ? WHERE id = ?", [receipt.hash, row.id]);
+        }
+      }
       
       await db.end();
     }
   } catch (dbError) {
-    console.warn("⚠️ Could not recover bindings from DB:", dbError.message);
+    console.warn("⚠️ Could not recover bindings/thresholds/transactions from DB:", dbError.message);
   }
 
   // Let Node.js exit gracefully without process.exit(0) to prevent libuv async bug on Windows

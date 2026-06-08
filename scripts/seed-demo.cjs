@@ -22,27 +22,83 @@ async function main() {
 
   console.log("🚀 Initializing Demo Data...");
   
-  // 1. Bind relationship
+  // 1. Bind relationship on-chain
   console.log(`🔗 Binding ward ${ward.address} to guardian ${guardian.address}`);
-  await dapp.connect(oracle).bindGuardian(ward.address, guardian.address);
+  let tx = await dapp.connect(oracle).bindGuardian(ward.address, guardian.address);
+  await tx.wait();
   
-  // 2. Set threshold to 800 Wei
+  // 2. Set threshold to 800 Wei on-chain
   console.log("💰 Setting threshold to 800 Wei for ward");
-  await dapp.connect(ward).setThreshold(800);
+  tx = await dapp.connect(ward).setThreshold(800);
+  await tx.wait();
 
-  // 3. Record small payments (Auto Approved)
+  // 3. Sync to MySQL database
+  const mysql = require("mysql2/promise");
+  const dotenv = require("dotenv");
+  dotenv.config({ path: envPath });
+  
+  let db;
+  if (process.env.DB_HOST) {
+    try {
+      db = await mysql.createConnection({
+        host: process.env.DB_HOST,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME
+      });
+      console.log("💾 Cleaning and seeding MySQL tables for ward...");
+      await db.execute("DELETE FROM guardianship_bindings WHERE ward_address = ?", [ward.address]);
+      await db.execute("DELETE FROM user_thresholds WHERE ward_address = ?", [ward.address]);
+      await db.execute("DELETE FROM transactions WHERE ward_address = ?", [ward.address]);
+
+      await db.execute(
+        "INSERT INTO guardianship_bindings (ward_address, guardian_address) VALUES (?, ?)",
+        [ward.address, guardian.address]
+      );
+      await db.execute(
+        "INSERT INTO user_thresholds (ward_address, threshold_amount) VALUES (?, ?)",
+        [ward.address, 800]
+      );
+    } catch (dbErr) {
+      console.warn("⚠️ MySQL connection failed during seeding, continuing with blockchain only:", dbErr.message);
+    }
+  }
+
+  // 4. Record small payments (Auto Approved)
   console.log("✅ Recording 5 small payments (Auto Approved)...");
   for(let i=1; i<=5; i++) {
-    await dapp.connect(oracle).recordPayment(ward.address, 100 + i*100, `早餐 #${i}`);
+    const amount = 100 + i*100;
+    const category = `早餐 #${i}`;
+    const payTx = await dapp.connect(oracle).recordPayment(ward.address, amount, category);
+    const receipt = await payTx.wait();
+    if (db) {
+      await db.execute(
+        "INSERT INTO transactions (ward_address, amount, merchant_type, tx_hash) VALUES (?, ?, ?, ?)",
+        [ward.address, amount, category, receipt.hash]
+      );
+    }
   }
 
-  // 4. Record large payments (Pending)
+  // 5. Record large payments (Pending)
   console.log("⚠️ Recording 5 large payments (Pending Approval)...");
   for(let i=1; i<=5; i++) {
-    await dapp.connect(oracle).recordPayment(ward.address, 1500 + i*100, `数码产品 #${i}`);
+    const amount = 1500 + i*100;
+    const category = `数码产品 #${i}`;
+    const payTx = await dapp.connect(oracle).recordPayment(ward.address, amount, category);
+    const receipt = await payTx.wait();
+    if (db) {
+      await db.execute(
+        "INSERT INTO transactions (ward_address, amount, merchant_type, tx_hash) VALUES (?, ?, ?, ?)",
+        [ward.address, amount, category, receipt.hash]
+      );
+    }
   }
 
-  console.log("✨ Demo data seeded successfully!");
+  if (db) {
+    await db.end();
+  }
+
+  console.log("✨ Demo data seeded successfully to blockchain and MySQL!");
 }
 
 main().catch((error) => {

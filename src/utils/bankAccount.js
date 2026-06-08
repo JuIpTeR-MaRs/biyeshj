@@ -52,25 +52,47 @@ export const verifyLogin = (phone, password) => {
 export const seedTestAccount = () => {
   const accounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
   
+  // Hardhat default test accounts to match seed data
+  const wardWallet = new ethers.Wallet("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
+  const guardianWallet = new ethers.Wallet("0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a");
+
   // 账户 A: 被监护人
   const wardPhone = "15876581014";
-  if (!accounts.find(a => a.phone === wardPhone)) {
-    const wardAccount = createLocalBankAccount(wardPhone, "123");
-    wardAccount.accountName = "被监护人 (张三)";
-    wardAccount.role = "ward";
+  let wardAccount = accounts.find(a => a.phone === wardPhone);
+  if (!wardAccount) {
+    wardAccount = createLocalBankAccount(wardPhone, "123");
     accounts.push(wardAccount);
   }
+  // Force fixed address for demo matching
+  wardAccount.address = wardWallet.address;
+  wardAccount.privateKey = wardWallet.privateKey;
+  wardAccount.accountName = "被监护人 (张三)";
+  wardAccount.role = "ward";
 
   // 账户 B: 监护人
   const guardianPhone = "13826193664";
-  if (!accounts.find(a => a.phone === guardianPhone)) {
-    const guardianAccount = createLocalBankAccount(guardianPhone, "123");
-    guardianAccount.accountName = "监护人 (李四)";
-    guardianAccount.role = "guardian";
+  let guardianAccount = accounts.find(a => a.phone === guardianPhone);
+  if (!guardianAccount) {
+    guardianAccount = createLocalBankAccount(guardianPhone, "123");
     accounts.push(guardianAccount);
   }
+  // Force fixed address for demo matching
+  guardianAccount.address = guardianWallet.address;
+  guardianAccount.privateKey = guardianWallet.privateKey;
+  guardianAccount.accountName = "监护人 (李四)";
+  guardianAccount.role = "guardian";
 
   localStorage.setItem('bank_all_accounts', JSON.stringify(accounts));
+
+  // Sync current user if they are logged in with a test account
+  const currentUser = JSON.parse(localStorage.getItem('bank_current_user') || 'null');
+  if (currentUser) {
+    if (currentUser.phone === wardPhone) {
+      localStorage.setItem('bank_current_user', JSON.stringify(wardAccount));
+    } else if (currentUser.phone === guardianPhone) {
+      localStorage.setItem('bank_current_user', JSON.stringify(guardianAccount));
+    }
+  }
 };
 
 export const getAllLocalAccounts = () => {

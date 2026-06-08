@@ -13,7 +13,7 @@ import { getContract, fundAccount } from '../../utils/contract';
 
 export const LoginPage = ({ onLogin }) => {
   const [accounts, setAccounts] = useState([]);
-  const [loginMode, setLoginMode] = useState('phone'); // 'phone', 'register', 'quick'
+  const [loginMode, setLoginMode] = useState('phone'); // 'phone', 'register', 'quick', 'admin'
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('ward'); // 'ward' or 'guardian'
@@ -44,6 +44,20 @@ export const LoginPage = ({ onLogin }) => {
       }
       setIsLoading(false);
     }, 1000);
+  };
+
+  const handleAdminLogin = (e) => {
+    e.preventDefault();
+    if (phone === 'admin' && password === 'admin123') {
+      setIsLoading(true);
+      setTimeout(() => {
+        toast.success("管理员认证成功");
+        onLogin({ role: 'admin', accountName: '超级管理员', address: 'admin' });
+        setIsLoading(false);
+      }, 800);
+    } else {
+      toast.error("验证失败：管理员账号或密码错误");
+    }
   };
 
   const handleRegister = async (e) => {
@@ -119,13 +133,13 @@ export const LoginPage = ({ onLogin }) => {
 
           {/* Mode Tabs */}
           <div className="flex bg-white/5 p-1 rounded-2xl mb-8">
-            {['phone', 'register', 'quick'].map((m) => (
+            {['phone', 'register', 'quick', 'admin'].map((m) => (
               <button 
                 key={m}
                 onClick={() => setLoginMode(m)}
                 className={`flex-1 py-2 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all ${loginMode === m ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
               >
-                {m === 'phone' ? '登录' : m === 'register' ? '注册' : '快速切换'}
+                {m === 'phone' ? '登录' : m === 'register' ? '注册' : m === 'quick' ? '快速切换' : '管理后台'}
               </button>
             ))}
           </div>
@@ -219,6 +233,43 @@ export const LoginPage = ({ onLogin }) => {
                   ))}
                 </div>
               </div>
+            )}
+
+            {loginMode === 'admin' && (
+              <form onSubmit={handleAdminLogin} className="space-y-4 animate-in slide-in-from-right-4 duration-300">
+                <div className="text-center mb-6">
+                  <Shield className="w-12 h-12 text-indigo-400 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm text-slate-400">系统管理中心入口</p>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">管理员账号</label>
+                  <div className="relative group">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+                    <input 
+                      type="text" placeholder="请输入管理员账号" value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 focus:border-indigo-500/50 rounded-2xl py-3.5 pl-11 pr-4 text-white text-sm outline-none transition-all"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">管理员密码</label>
+                  <div className="relative group">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+                    <input 
+                      type={showPassword ? "text" : "password"} placeholder="请输入管理员密码" value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 focus:border-indigo-500/50 rounded-2xl py-3.5 pl-11 pr-11 text-white text-sm outline-none transition-all"
+                    />
+                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+                <button disabled={isLoading} className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-slate-900/50 transition-all flex items-center justify-center space-x-2 mt-6">
+                  {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <><span>进入后台</span><Shield className="w-4 h-4" /></>}
+                </button>
+              </form>
             )}
           </div>
         </div>

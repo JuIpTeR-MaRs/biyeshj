@@ -618,6 +618,103 @@ app.get("/api/alipay/return", async (req, res) => {
     }
 });
 
+// 5. 管理员获取后台全部数据
+app.get("/api/admin/all-data", async (req, res) => {
+    try {
+        const data = await paymentService.getAllAdminData();
+        if (data.success) {
+            res.json(data);
+        } else {
+            res.status(500).json(data);
+        }
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 6. 消费历史 AI 智能分析接口 (DeepSeek)
+app.post("/api/analysis/consumption", async (req, res) => {
+    const { txs, role } = req.body;
+    if (!txs || !Array.isArray(txs)) {
+        return res.status(400).json({ success: false, error: "缺少交易流水数据 txs" });
+    }
+
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+        return res.status(500).json({ success: false, error: "系统未配置 DEEPSEEK_API_KEY，请检查环境配置" });
+    }
+
+    // 格式化交易记录，使其更易读
+    const normalizeTxs = (list) => {
+        return list.map(t => {
+            const amount = t.amount || "0";
+            const category = t.merchantType || t.merchant_type || "未知";
+            const ward = t.ward || t.ward_address || "未知";
+            const wardName = t.wardName || "";
+            const time = t.timestamp ? new Date(Number(t.timestamp) * 1000).toLocaleString() : (t.created_at ? new Date(t.created_at).toLocaleString() : "未知");
+            
+            let status = "已完成";
+            if (t.isPending !== undefined) {
+                status = t.isPending ? "待审批" : (t.isApproved ? "已批准" : "已拒绝");
+            }
+            
+            return {
+                id: t.id,
+                ward: wardName ? `${wardName} (${ward.slice(0, 6)}...${ward.slice(-4)})` : ward,
+                amount: `${amount} 元/Wei`,
+                category,
+                time,
+                status
+            };
+        });
+    };
+
+    const formattedTxs = normalizeTxs(txs);
+
+    let systemPrompt = "";
+    if (role === 'admin') {
+        systemPrompt = "你是一个平台级的区块链金融审计与数据分析专家。你的任务是分析智能监护平台全网的交易流水，评估全网的运行状况和潜在的系统性风险。分析应该包含：1. 全网整体交易规模与笔数分析；2. 消费商户与类别的全网集中度；3. 异常交易诊断（例如是否有刷单、过度高频交易、异常大额洗钱嫌疑）；4. 给系统管理员的运营与风控建议。使用中文，语气严谨、专业，排版精美。";
+    } else if (role === 'guardian') {
+        systemPrompt = "你是一个专业的家庭教育与智能监护顾问。你的任务是分析被监护成员的区块链消费行为，协助监护人了解家人的支出状况。分析应该包含：1. 成员支出的主要领域及趋势；2. 大额消费与超额触发预警的情况（哪些需要审批，哪些已自动通过）；3. 从监护人管理角度给出科学合理的干预建议（如调整阈值、沟通理财观念等）。使用中文，语气专业、客观，排版精美。";
+    } else {
+        systemPrompt = "你是一个贴心的家庭智能财务顾问。你的任务是根据被监护人提供的区块链消费记录，分析其消费习惯。分析应该包含：1. 消费总支出与结构占比；2. 是否存在非必要消费、大额异常支出；3. 给出温和的、鼓励性的财务规划建议（如储蓄小目标、规避超支风险）。注意使用中文，语气温和、正面，并且排版精美（使用markdown，适当加粗和列表）。";
+    }
+
+    const userPrompt = `以下是格式化后的交易流水记录：\n${JSON.stringify(formattedTxs, null, 2)}\n\n请针对上述数据为角色为 "${role}" 的用户生成详细的消费历史智能分析诊断报告。`;
+
+    try {
+        console.log(`[AI Analysis] Requesting DeepSeek for role: ${role}, total transactions: ${txs.length}`);
+        const response = await fetch("https://api.deepseek.com/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: "deepseek-chat",
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt }
+                ],
+                temperature: 0.7,
+                max_tokens: 2000
+            })
+        });
+
+        const data = await response.json();
+        if (data.choices && data.choices[0] && data.choices[0].message) {
+            const analysisText = data.choices[0].message.content;
+            res.json({ success: true, analysis: analysisText });
+        } else {
+            console.error("[AI Analysis] DeepSeek Error response:", data);
+            res.status(500).json({ success: false, error: data.error?.message || "大模型返回格式错误" });
+        }
+    } catch (err) {
+        console.error("[AI Analysis] API Error:", err.message);
+        res.status(500).json({ success: false, error: `调用大模型服务失败: ${err.message}` });
+    }
+});
+
 paymentService.generateSeedData();
 app.listen(PORT, () => {
     console.log(`🏦 Local Bank Core running on http://localhost:${PORT}`);

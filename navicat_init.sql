@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS `transactions` (
   `amount` decimal(20,2) NOT NULL COMMENT '交易金额 (Wei / 元)',
   `merchant_type` varchar(100) NOT NULL COMMENT '商户/消费类别',
   `tx_hash` varchar(66) NOT NULL COMMENT '对应区块链交易哈希 (txHash)',
+  `merchant_address` varchar(42) DEFAULT NULL COMMENT '收款商户钱包地址',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '流水记录创建时间',
   PRIMARY KEY (`id`),
   KEY `idx_ward_address` (`ward_address`),
@@ -34,7 +35,7 @@ CREATE TABLE IF NOT EXISTS `guardianship_bindings` (
   `guardian_address` varchar(42) NOT NULL COMMENT '监护人钱包地址',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '绑定时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_ward` (`ward_address`),
+  UNIQUE KEY `uk_ward_guardian` (`ward_address`, `guardian_address`),
   KEY `idx_guardian` (`guardian_address`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='监护关系绑定关系映射表';
 

@@ -96,7 +96,8 @@ async function main() {
     console.warn("⚠️ Could not recover bindings/thresholds/transactions from DB:", dbError.message);
   }
 
-  // Let Node.js exit gracefully without process.exit(0) to prevent libuv async bug on Windows
+  // Force clean exit to prevent libuv native assertion crash on Windows
+  process.exit(0);
 }
 
 main().catch((error) => {

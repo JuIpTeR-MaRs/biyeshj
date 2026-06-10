@@ -117,27 +117,32 @@ export const LoginPage = ({ onLogin }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F172A] overflow-hidden font-sans">
-      {/* Background elements */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/20 blur-[120px] rounded-full animate-pulse"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/20 blur-[120px] rounded-full animate-pulse" style={{ animationDelay: '1s' }}></div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950 overflow-hidden font-sans">
+      {/* Background elements with smooth pulse animation */}
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-indigo-600/10 blur-[130px] rounded-full animate-pulse duration-[6000ms]"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-blue-600/10 blur-[130px] rounded-full animate-pulse duration-[6000ms]" style={{ animationDelay: '2s' }}></div>
 
-      <div className="relative w-full max-w-md p-8 animate-in fade-in zoom-in duration-700">
-        <div className="bg-white/5 backdrop-blur-3xl border border-white/10 rounded-[40px] shadow-2xl p-8 md:p-10">
+      <div className="relative w-full max-w-md p-6 animate-in fade-in zoom-in-95 duration-500">
+        <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[40px] shadow-2xl p-8 md:p-10">
           <div className="flex flex-col items-center mb-8">
-            <div className="w-16 h-16 bg-gradient-to-tr from-indigo-600 to-blue-500 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20 mb-4">
-              <Shield className="w-8 h-8 text-white" />
+            <div className="w-16 h-16 bg-gradient-to-tr from-indigo-600 to-blue-500 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20 mb-4 hover:rotate-6 transition-transform duration-300">
+              <Shield className="w-8 h-8 text-white animate-pulse" />
             </div>
-            <h1 className="text-2xl font-black text-white tracking-tight text-center">智能监护银行</h1>
+            <h1 className="text-2xl font-black bg-clip-text text-transparent bg-gradient-to-r from-slate-100 to-slate-300 tracking-tight text-center">智能监护银行</h1>
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">Smart Guardianship Banking</p>
           </div>
 
           {/* Mode Tabs */}
-          <div className="flex bg-white/5 p-1 rounded-2xl mb-8">
+          <div className="flex bg-slate-950/60 border border-slate-800/50 p-1 rounded-2xl mb-8">
             {['phone', 'register', 'quick', 'admin'].map((m) => (
               <button 
                 key={m}
                 onClick={() => setLoginMode(m)}
-                className={`flex-1 py-2 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all ${loginMode === m ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all duration-300 ${
+                  loginMode === m 
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
               >
                 {m === 'phone' ? '登录' : m === 'register' ? '注册' : m === 'quick' ? '快速切换' : '管理后台'}
               </button>
@@ -148,68 +153,95 @@ export const LoginPage = ({ onLogin }) => {
             {loginMode === 'phone' && (
               <form onSubmit={handlePhoneLogin} className="space-y-4 animate-in slide-in-from-left-4 duration-300">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">手机号</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">手机号</label>
                   <div className="relative group">
-                    <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+                    <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors duration-300" />
                     <input 
                       type="text" placeholder="手机号" value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 focus:border-indigo-500/50 rounded-2xl py-3.5 pl-11 pr-4 text-white text-sm outline-none transition-all"
+                      className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 rounded-2xl py-3.5 pl-11 pr-4 text-slate-200 text-sm outline-none transition-all duration-300"
                     />
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">密码</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">密码</label>
                   <div className="relative group">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors duration-300" />
                     <input 
                       type={showPassword ? "text" : "password"} placeholder="密码" value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 focus:border-indigo-500/50 rounded-2xl py-3.5 pl-11 pr-11 text-white text-sm outline-none transition-all"
+                      className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 rounded-2xl py-3.5 pl-11 pr-11 text-slate-200 text-sm outline-none transition-all duration-300"
                     />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors duration-300">
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
-                <button disabled={isLoading} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-600/20 transition-all flex items-center justify-center space-x-2 mt-6">
+                <button disabled={isLoading} className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:from-indigo-700 disabled:to-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-500/10 hover:shadow-indigo-500/20 transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center space-x-2 mt-6">
                   {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <><span>进入系统</span><ArrowRight className="w-4 h-4" /></>}
                 </button>
               </form>
             )}
 
             {loginMode === 'register' && (
-              <form onSubmit={handleRegister} className="space-y-4 animate-in fade-in duration-300">
-                <div className="grid grid-cols-2 gap-3 mb-2">
-                  <button type="button" onClick={() => setRole('ward')} className={`flex items-center justify-center space-x-2 p-3 rounded-2xl border transition-all ${role === 'ward' ? 'bg-indigo-600/20 border-indigo-500 text-white' : 'bg-white/5 border-white/10 text-slate-500'}`}>
-                    <Users className="w-4 h-4" /> <span className="text-xs font-bold">被监护人</span>
+              <form onSubmit={handleRegister} className="space-y-4 animate-in slide-in-from-right-4 duration-300">
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  <button 
+                    type="button" 
+                    onClick={() => setRole('ward')} 
+                    className={`flex flex-col items-center justify-center p-2 rounded-2xl border transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] ${
+                      role === 'ward' 
+                        ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 shadow-md shadow-emerald-500/5' 
+                        : 'bg-slate-950/40 border-slate-800 text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    <Users className="w-4 h-4 mb-1" /> <span className="text-[10px] font-black">被监护人</span>
                   </button>
-                  <button type="button" onClick={() => setRole('guardian')} className={`flex items-center justify-center space-x-2 p-3 rounded-2xl border transition-all ${role === 'guardian' ? 'bg-indigo-600/20 border-indigo-500 text-white' : 'bg-white/5 border-white/10 text-slate-500'}`}>
-                    <UserCheck className="w-4 h-4" /> <span className="text-xs font-bold">监护人</span>
+                  <button 
+                    type="button" 
+                    onClick={() => setRole('guardian')} 
+                    className={`flex flex-col items-center justify-center p-2 rounded-2xl border transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] ${
+                      role === 'guardian' 
+                        ? 'bg-blue-500/10 border-blue-500 text-blue-400 shadow-md shadow-blue-500/5' 
+                        : 'bg-slate-950/40 border-slate-800 text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    <UserCheck className="w-4 h-4 mb-1" /> <span className="text-[10px] font-black">监护人</span>
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => setRole('merchant')} 
+                    className={`flex flex-col items-center justify-center p-2 rounded-2xl border transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] ${
+                      role === 'merchant' 
+                        ? 'bg-amber-500/10 border-amber-500 text-amber-400 shadow-md shadow-amber-500/5' 
+                        : 'bg-slate-950/40 border-slate-800 text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    <Banknote className="w-4 h-4 mb-1" /> <span className="text-[10px] font-black">特约商户</span>
                   </button>
                 </div>
 
                 <div className="space-y-3">
                   <div className="relative">
                     <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                    <input type="text" placeholder="注册手机号" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-11 pr-4 text-white text-sm outline-none" />
+                    <input type="text" placeholder="注册手机号" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-indigo-500/50 rounded-2xl py-3.5 pl-11 pr-4 text-slate-200 text-sm outline-none transition-all duration-300" />
                   </div>
                   <div className="relative">
                     <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                    <input type="password" placeholder="设置密码" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-11 pr-4 text-white text-sm outline-none" />
+                    <input type="password" placeholder="设置密码" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-indigo-500/50 rounded-2xl py-3.5 pl-11 pr-4 text-slate-200 text-sm outline-none transition-all duration-300" />
                   </div>
                   {role === 'ward' && (
                     <div className="space-y-1.5 animate-in slide-in-from-top-2 duration-300">
                       <label className="text-[10px] font-bold text-amber-500 uppercase tracking-widest px-1">需要监护人同意</label>
                       <div className="relative">
                         <UserCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500/50" />
-                        <input type="text" placeholder="监护人手机号" value={guardianPhone} onChange={(e) => setGuardianPhone(e.target.value)} className="w-full bg-amber-500/5 border border-amber-500/20 rounded-2xl py-3.5 pl-11 pr-4 text-white text-sm outline-none" />
+                        <input type="text" placeholder="监护人手机号" value={guardianPhone} onChange={(e) => setGuardianPhone(e.target.value)} className="w-full bg-amber-500/5 border border-amber-500/20 rounded-2xl py-3.5 pl-11 pr-4 text-slate-200 text-sm outline-none focus:border-amber-500/50 transition-all duration-300" />
                       </div>
                     </div>
                   )}
                 </div>
 
-                <button disabled={isLoading} className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg transition-all mt-4">
+                <button disabled={isLoading} className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-600/10 hover:shadow-indigo-600/20 transition-all duration-300 transform active:scale-[0.98] mt-4">
                   {isLoading ? '处理中...' : '完成注册并登录'}
                 </button>
               </form>
@@ -219,18 +251,47 @@ export const LoginPage = ({ onLogin }) => {
               <div className="space-y-3 animate-in slide-in-from-right-4 duration-300">
                 <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-2">本地已知账户</p>
                 <div className="max-h-60 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
-                  {accounts.map((acc, idx) => (
-                    <button key={idx} onClick={() => handleQuickLogin(acc)} className="w-full group flex items-center p-3.5 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl transition-all text-left">
-                      <div className="w-9 h-9 bg-slate-800 rounded-xl flex items-center justify-center mr-3 group-hover:bg-indigo-600/20">
-                        <User className="w-4 h-4 text-slate-400 group-hover:text-indigo-400" />
-                      </div>
-                      <div className="flex-1 overflow-hidden">
-                        <p className="text-white font-bold text-xs truncate">{acc.accountName}</p>
-                        <p className="text-slate-500 text-[10px] font-mono">{maskCardNumber(acc.cardNumber)}</p>
-                      </div>
-                      <ArrowRight className="w-3 h-3 text-slate-600 group-hover:text-white" />
-                    </button>
-                  ))}
+                  {accounts.map((acc, idx) => {
+                    let glowColor = "hover:border-indigo-500/30 hover:shadow-indigo-500/5";
+                    let badgeColor = "bg-slate-800 text-slate-300";
+                    let badgeLabel = "成员";
+                    
+                    if (acc.role === 'guardian') {
+                      glowColor = "hover:border-blue-500/30 hover:shadow-blue-500/5";
+                      badgeColor = "bg-blue-500/10 border border-blue-500/20 text-blue-400";
+                      badgeLabel = "监护人";
+                    } else if (acc.role === 'merchant') {
+                      glowColor = "hover:border-amber-500/30 hover:shadow-amber-500/5";
+                      badgeColor = "bg-amber-500/10 border border-amber-500/20 text-amber-400";
+                      badgeLabel = "商户";
+                    } else if (acc.role === 'ward') {
+                      glowColor = "hover:border-emerald-500/30 hover:shadow-emerald-500/5";
+                      badgeColor = "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400";
+                      badgeLabel = "被监护";
+                    }
+                    
+                    return (
+                      <button 
+                        key={idx} 
+                        onClick={() => handleQuickLogin(acc)} 
+                        className={`w-full group flex items-center p-3.5 bg-slate-950/40 border border-slate-900 rounded-2xl transition-all duration-300 text-left hover:scale-[1.01] hover:bg-slate-900/30 ${glowColor}`}
+                      >
+                        <div className="w-9 h-9 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-center mr-3 group-hover:bg-indigo-600/10 transition-colors duration-300">
+                          <User className="w-4 h-4 text-slate-400 group-hover:text-indigo-400 transition-colors duration-300" />
+                        </div>
+                        <div className="flex-1 overflow-hidden">
+                          <div className="flex items-center space-x-1.5">
+                            <p className="text-slate-200 font-bold text-xs truncate group-hover:text-white transition-colors">{acc.accountName}</p>
+                            <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${badgeColor}`}>
+                              {badgeLabel}
+                            </span>
+                          </div>
+                          <p className="text-slate-500 text-[10px] font-mono mt-0.5">{maskCardNumber(acc.cardNumber)}</p>
+                        </div>
+                        <ArrowRight className="w-3.5 h-3.5 text-slate-600 group-hover:text-white transition-all transform group-hover:translate-x-1" />
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -238,35 +299,35 @@ export const LoginPage = ({ onLogin }) => {
             {loginMode === 'admin' && (
               <form onSubmit={handleAdminLogin} className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                 <div className="text-center mb-6">
-                  <Shield className="w-12 h-12 text-indigo-400 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm text-slate-400">系统管理中心入口</p>
+                  <Shield className="w-12 h-12 text-purple-400 mx-auto mb-2 opacity-50 animate-pulse" />
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">系统管理中心入口</p>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">管理员账号</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">管理员账号</label>
                   <div className="relative group">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-purple-400 transition-colors duration-300" />
                     <input 
                       type="text" placeholder="请输入管理员账号" value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 focus:border-indigo-500/50 rounded-2xl py-3.5 pl-11 pr-4 text-white text-sm outline-none transition-all"
+                      className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-purple-500/50 rounded-2xl py-3.5 pl-11 pr-4 text-slate-200 text-sm outline-none transition-all duration-300"
                     />
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">管理员密码</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">管理员密码</label>
                   <div className="relative group">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-purple-400 transition-colors duration-300" />
                     <input 
                       type={showPassword ? "text" : "password"} placeholder="请输入管理员密码" value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 focus:border-indigo-500/50 rounded-2xl py-3.5 pl-11 pr-11 text-white text-sm outline-none transition-all"
+                      className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-purple-500/50 rounded-2xl py-3.5 pl-11 pr-11 text-slate-200 text-sm outline-none transition-all duration-300"
                     />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
-                <button disabled={isLoading} className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-slate-900/50 transition-all flex items-center justify-center space-x-2 mt-6">
+                <button disabled={isLoading} className="w-full bg-gradient-to-r from-indigo-700 via-purple-700 to-indigo-700 hover:from-indigo-600 hover:via-purple-600 hover:to-indigo-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-purple-600/10 hover:shadow-purple-600/20 transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center space-x-2 mt-6">
                   {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <><span>进入后台</span><Shield className="w-4 h-4" /></>}
                 </button>
               </form>

@@ -99,6 +99,7 @@ async function main() {
   }
 
   console.log("✨ Demo data seeded successfully to blockchain and MySQL!");
+  process.exit(0);
 }
 
 main().catch((error) => {

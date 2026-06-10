@@ -2,14 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ethers } from 'ethers';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import { Shield, User, UserPlus, Users, Clock, AlertTriangle } from 'lucide-react';
-import { WalletConnect } from './components/WalletConnect';
+import { Shield, User, UserPlus, Users, Clock, AlertTriangle, QrCode, ShoppingBag } from 'lucide-react';
+import { Navbar } from './components/layout/Navbar';
 import { PendingList } from './components/PendingList';
 import { LoginPage } from './components/Login/LoginPage';
 import { RequestList } from './components/RequestList';
 import { HistoryList } from './components/HistoryList';
 import { AdminDashboard } from './components/Admin/AdminDashboard';
 import { AiAnalysisCard } from './components/AiAnalysis/AiAnalysisCard';
+import { MerchantDashboard } from './components/Merchant/MerchantDashboard';
 import { getContract, CONTRACT_ADDRESS, fundAccount } from './utils/contract';
 import { getLocalBankUser } from './utils/bankAccount';
 
@@ -23,11 +24,20 @@ function App() {
 
   // 监护人/被监护人状态
   const [guardianInfo, setGuardianInfo] = useState(null);
+  const [guardianInfos, setGuardianInfos] = useState([]);
   const [pendingGuardianInfo, setPendingGuardianInfo] = useState(null);
   const [activeWards, setActiveWards] = useState([]);
   const [myThreshold, setMyThreshold] = useState("0");
   const [editingThreshold, setEditingThreshold] = useState(null);
   const [isUpdatingThreshold, setIsUpdatingThreshold] = useState(false);
+
+  // 仿真扫码状态
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanInput, setScanInput] = useState('');
+  const [scannedMerchant, setScannedMerchant] = useState(null);
+  const [scanAmount, setScanAmount] = useState('');
+  const [isScanning, setIsScanning] = useState(false);
+  const [isScanPaying, setIsScanPaying] = useState(false);
 
   // 被监护人端表单状态
   const [bindPhone, setBindPhone] = useState('');
@@ -62,6 +72,7 @@ function App() {
     setIsLoggedIn(false);
     setAccount(null);
     setGuardianInfo(null);
+    setGuardianInfos([]);
     setPendingGuardianInfo(null);
     setActiveWards([]);
   };
@@ -70,6 +81,11 @@ function App() {
     if (!account) return;
     if (account === 'admin') {
       setRole('admin');
+      return;
+    }
+    const currentUser = getLocalBankUser() || {};
+    if (currentUser.role === 'merchant') {
+      setRole('merchant');
       return;
     }
     try {
@@ -103,8 +119,8 @@ function App() {
       const wardsList = [];
       for (const accInfo of allAccounts) {
         try {
-          const activeG = await contract.wardToGuardian(accInfo.address);
-          if (activeG.toLowerCase() === account.toLowerCase()) {
+          const isG = await contract.isWardGuardian(accInfo.address, account);
+          if (isG) {
             const thres = await contract.threshold(accInfo.address);
             wardsList.push({...accInfo, threshold: thres.toString()});
           }
@@ -120,10 +136,10 @@ function App() {
 
 
       // 4. 被监护人信息：查询当前用户的监护人和申请中的监护人
-      let activeGuardian = "0x0000000000000000000000000000000000000000";
+      let activeGuardians = [];
       let reqGuardian = "0x0000000000000000000000000000000000000000";
       try {
-        activeGuardian = await contract.wardToGuardian(account);
+        activeGuardians = await contract.getWardGuardians(account);
         reqGuardian = await contract.pendingWardToGuardian(account);
       } catch (e) {
         console.error("Query ward status error:", e);
@@ -131,12 +147,17 @@ function App() {
 
       const zeroAddr = "0x0000000000000000000000000000000000000000";
       
-      if (activeGuardian && activeGuardian !== zeroAddr) {
-        const info = allAccounts.find(a => a.address.toLowerCase() === activeGuardian.toLowerCase());
-        setGuardianInfo(info || { address: activeGuardian, accountName: "已绑定监护人" });
-      } else {
-        setGuardianInfo(null);
+      const guardianInfosList = [];
+      if (activeGuardians && activeGuardians.length > 0) {
+        for (const gAddr of activeGuardians) {
+          if (gAddr && gAddr !== zeroAddr) {
+            const info = allAccounts.find(a => a.address.toLowerCase() === gAddr.toLowerCase());
+            guardianInfosList.push(info || { address: gAddr, accountName: "已绑定监护人" });
+          }
+        }
       }
+      setGuardianInfos(guardianInfosList);
+      setGuardianInfo(guardianInfosList[0] || null);
 
       if (reqGuardian && reqGuardian !== zeroAddr) {
         const info = allAccounts.find(a => a.address.toLowerCase() === reqGuardian.toLowerCase());
@@ -146,11 +167,16 @@ function App() {
       }
 
       // 5. 角色判定
-      const hasWards = wardsList.length > 0;
-      const isGuardianOnChain = ids.length > 0 || txDetails.length > 0 || requests.length > 0 || hasWards;
-      const currentUser = getLocalBankUser() || {};
-      const isGuardian = isGuardianOnChain || currentUser.role === 'guardian';
-      setRole(isGuardian ? 'guardian' : 'ward');
+      let resolvedRole = 'ward';
+      if (currentUser.role === 'merchant') {
+        resolvedRole = 'merchant';
+      } else {
+        const hasWards = wardsList.length > 0;
+        const isGuardianOnChain = ids.length > 0 || txDetails.length > 0 || requests.length > 0 || hasWards;
+        const isGuardian = isGuardianOnChain || currentUser.role === 'guardian';
+        resolvedRole = isGuardian ? 'guardian' : 'ward';
+      }
+      setRole(resolvedRole);
 
       // 6. 获取历史消费记录
       const txCount = await contract.txCounter();
@@ -173,7 +199,7 @@ function App() {
         }
       }
 
-      const currentRole = isGuardian ? 'guardian' : 'ward';
+      const currentRole = resolvedRole === 'guardian' ? 'guardian' : 'ward';
       let filteredTxs = [];
       if (currentRole === 'ward') {
         filteredTxs = allTxs.filter(tx => tx.ward.toLowerCase() === account.toLowerCase());
@@ -278,7 +304,7 @@ function App() {
       fetchData();
     } catch (err) {
       console.error(err);
-      toast.error(err.reason || "绑定申请失败，请重试");
+      toast.error(err.reason || "绑定申请失败，请重支");
     } finally {
       setIsBinding(false);
     }
@@ -378,6 +404,75 @@ function App() {
       toast.error(err.reason || "修改阈值失败");
     } finally {
       setIsUpdatingThreshold(false);
+    }
+  };
+
+  // 仿真扫码付款方法
+  const handleOpenScan = () => {
+    setShowScanModal(true);
+    setScanInput('');
+    setScannedMerchant(null);
+    setScanAmount('');
+  };
+
+  const handleSimulateScan = (merchantData) => {
+    setIsScanning(true);
+    setTimeout(() => {
+      try {
+        const info = typeof merchantData === 'string' ? JSON.parse(merchantData) : merchantData;
+        if (info.merchantAddress && info.merchantName) {
+          setScannedMerchant(info);
+          toast.success(`扫码成功！已连接到 [${info.merchantName}] 收款端`);
+        } else {
+          toast.error("无效的收款码数据，格式不正确");
+        }
+      } catch (e) {
+        toast.error("无法解析收款码数据，请确认格式");
+      } finally {
+        setIsScanning(false);
+      }
+    }, 800);
+  };
+
+  const handleScanPay = async (e) => {
+    e.preventDefault();
+    if (!scanAmount || isNaN(scanAmount) || parseFloat(scanAmount) <= 0) {
+      toast.error("请输入有效的付款金额");
+      return;
+    }
+    setIsScanPaying(true);
+    try {
+      const response = await fetch("/api/alipay/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: parseFloat(scanAmount),
+          subject: scannedMerchant.merchantType || "娱乐购物",
+          wardAddress: account,
+          merchantAddress: scannedMerchant.merchantAddress
+        })
+      });
+      const data = await response.json();
+      if (data.success && data.qrCode) {
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(data.qrCode)}`;
+        setQrCodeUrl(qrUrl);
+        setQrOutTradeNo(data.outTradeNo);
+        setQrCountdown(60);
+        setShowScanModal(false);
+        setShowQrModal(true);
+        startPolling(data.outTradeNo);
+      } else if (data.riskIntercepted) {
+        toast.warn(data.message || "交易触发消费限制，已提交至监护人进行审批！");
+        setShowScanModal(false);
+        fetchData();
+      } else {
+        toast.error(data.error || "交易失败");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("付款请求失败，请检查网络");
+    } finally {
+      setIsScanPaying(false);
     }
   };
 
@@ -567,7 +662,7 @@ function App() {
         // 只通过事件触发数据刷新，不弹窗，因为 postMessage 已经处理了弹窗
         fetchData();
       } else if (curRole === 'guardian' && curActiveWards.some(w => w.address.toLowerCase() === ward.toLowerCase())) {
-        toast.info(`ℹ️ 被监护成员完成一笔自动允许的消费: ${amount.toString()} 元`, {
+        toast.info(`ℹ️ 被监护成员完成一笔自动允许 of 消费: ${amount.toString()} 元`, {
           position: "top-right",
           autoClose: 5000
         });
@@ -586,7 +681,8 @@ function App() {
       }
     };
 
-    setupListeners();
+    const setupListenersRef = setupListeners;
+    setupListenersRef();
 
     return () => {
       if (contractInstance) {
@@ -640,486 +736,649 @@ function App() {
     return <AdminDashboard onLogout={handleLogout} />;
   }
 
+  if (role === 'merchant') {
+    const currentUser = getLocalBankUser();
+    return <MerchantDashboard account={currentUser} onLogout={handleLogout} />;
+  }
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 selection:bg-blue-100">
-      <div className="max-w-3xl mx-auto py-12 px-6">
-        <div className="bg-white rounded-[40px] shadow-2xl shadow-blue-100 overflow-hidden border border-white">
-          <WalletConnect account={account} onConnect={connectWallet} onLogout={handleLogout} />
-          
-          <div className="p-8 lg:p-12">
-            {!account ? (
-              <div className="text-center py-20">
-                <div className="w-24 h-24 bg-blue-50 rounded-[32px] flex items-center justify-center mx-auto mb-6">
-                  <span className="text-4xl text-blue-500">🛡️</span>
-                </div>
-                <h2 className="text-3xl font-black text-gray-900 mb-4">欢迎访问监护系统</h2>
-                <p className="text-gray-500 max-w-xs mx-auto leading-relaxed">
-                  通过区块链技术为您的家人提供最安全的消费保障与监护。
-                </p>
+    <div className={`min-h-screen bg-slate-955 text-slate-100 ${role === 'guardian' ? 'selection:bg-blue-500/30' : 'selection:bg-emerald-500/30'} font-sans relative overflow-hidden`}>
+      {/* Background glowing widgets */}
+      <div className={`absolute top-[-10%] left-[-10%] w-[50%] h-[50%] blur-[130px] rounded-full pointer-events-none duration-[6000ms] animate-pulse ${
+        role === 'guardian' ? 'bg-blue-600/10' : 'bg-emerald-600/10'
+      }`}></div>
+      <div className={`absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] blur-[130px] rounded-full pointer-events-none duration-[6000ms] animate-pulse ${
+        role === 'guardian' ? 'bg-indigo-600/10' : 'bg-teal-600/10'
+      }`} style={{ animationDelay: '2s' }}></div>
+
+      <div className="max-w-6xl mx-auto py-10 px-6 relative z-10 space-y-8 animate-in fade-in zoom-in-95 duration-500">
+        {/* Navigation / Navbar Wrapper */}
+        <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] shadow-2xl overflow-hidden">
+          <Navbar currentUser={getLocalBankUser()} role={role} onLogout={handleLogout} />
+        </div>
+
+        <div className="space-y-8">
+          <div className="flex items-center justify-between bg-slate-900/20 border border-slate-800/60 rounded-2xl px-5 py-3 shadow-inner">
+            <div className="flex items-center space-x-3">
+              <div className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest ${
+                role === 'guardian' 
+                  ? 'bg-blue-500/10 border border-blue-500/20 text-blue-400 shadow-sm shadow-blue-500/5' 
+                  : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shadow-sm shadow-emerald-500/5'
+              }`}>
+                {role === 'guardian' ? '🛡️ 监护人视角' : '👤 被监护人视角'}
               </div>
-            ) : (
-              <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-                <div className="flex items-center space-x-3 mb-10">
-                  <div className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest ${
-                    role === 'guardian' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'
-                  }`}>
-                    {role === 'guardian' ? '🛡️ 监护人视角' : '👤 被监护人视角'}
-                  </div>
+            </div>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider font-sans">Blockchain Safety Dashboard</p>
+          </div>
+
+          {role === 'guardian' ? (
+            <div className="space-y-8">
+              {/* 被监护人列表 */}
+              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
+                <div className="flex justify-between items-center mb-6">
+                  <h4 className="text-lg font-bold text-slate-200 flex items-center space-x-2">
+                    <Users className="w-5 h-5 text-blue-400" />
+                    <span>👥 我管理的被监护成员</span>
+                  </h4>
+                  {!showAddWardForm && (
+                    <button
+                      onClick={() => setShowAddWardForm(true)}
+                      className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-blue-600/10 transition-all duration-300 flex items-center space-x-1.5 hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>添加成员</span>
+                    </button>
+                  )}
                 </div>
 
-                {role === 'guardian' ? (
-                  <div className="space-y-8">
-                    {/* 被监护人列表 */}
-                    <div className="bg-slate-50 border border-slate-200/60 rounded-[32px] p-8 shadow-sm">
-                      <div className="flex justify-between items-center mb-6">
-                        <h4 className="text-lg font-bold text-slate-800 flex items-center space-x-2">
-                          <Users className="w-5 h-5 text-indigo-500" />
-                          <span>👥 我管理的被监护成员</span>
-                        </h4>
-                        {!showAddWardForm && (
-                          <button
-                            onClick={() => setShowAddWardForm(true)}
-                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 transition-all flex items-center space-x-1.5"
-                          >
-                            <UserPlus className="w-4 h-4" />
-                            <span>添加成员</span>
-                          </button>
-                        )}
+                {showAddWardForm && (
+                  <form onSubmit={handleAddWard} className="mb-6 bg-slate-950/60 border border-slate-850 rounded-2xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-top-2 duration-300">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">被监护人手机号</label>
+                      <div className="relative group">
+                        <input
+                          type="text"
+                          placeholder="请输入已注册的被监护人手机号"
+                          value={wardPhoneInput}
+                          onChange={(e) => setWardPhoneInput(e.target.value)}
+                          className="w-full bg-slate-900/50 border border-slate-800 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                        />
                       </div>
+                      <p className="text-[10px] text-slate-500">系统将代表被监护人发送绑定请求，并由您立即自动确认，实现一键绑定。</p>
+                    </div>
+                    <div className="flex justify-end space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddWardForm(false)}
+                        className="px-4 py-2 border border-slate-850 bg-slate-900/20 hover:bg-slate-900/50 text-slate-400 hover:text-slate-200 rounded-xl text-xs font-bold transition-all duration-300"
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isAddingWard}
+                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-blue-800 disabled:to-indigo-800 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md shadow-blue-600/10 transition-all duration-300 flex items-center space-x-2"
+                      >
+                        {isAddingWard ? (
+                          <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        ) : (
+                          <span>确认添加</span>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                )}
 
-                      {showAddWardForm && (
-                        <form onSubmit={handleAddWard} className="mb-6 bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4 animate-in slide-in-from-top-2 duration-300">
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">被监护人手机号</label>
-                            <div className="relative group">
-                              <input
-                                type="text"
-                                placeholder="请输入已注册的被监护人手机号"
-                                value={wardPhoneInput}
-                                onChange={(e) => setWardPhoneInput(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200/60 focus:border-indigo-500/50 rounded-xl py-3 px-4 text-slate-700 text-sm outline-none transition-all"
+                {activeWards.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {activeWards.map((ward, idx) => (
+                      <div key={idx} className="bg-slate-950/40 border border-slate-850 rounded-2xl p-4 flex items-center space-x-3 shadow-sm hover:border-blue-500/20 hover:bg-slate-900/20 transition-all duration-300">
+                        <div className="w-10 h-10 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center justify-center text-blue-400 flex-shrink-0">
+                          <User className="w-5 h-5" />
+                        </div>
+                        <div className="overflow-hidden flex-1">
+                          <p className="text-slate-200 font-bold text-sm truncate">{ward.accountName}</p>
+                          <p className="text-slate-400 text-[10px] font-mono leading-none mb-1">{ward.phone}</p>
+                          <p className="text-slate-500 text-[9px] font-mono truncate">{ward.address}</p>
+                          <p className="text-blue-400 text-[11px] font-bold mt-1">当前消费阈值: {ward.threshold} 元</p>
+                        </div>
+                        <div className="flex flex-col space-y-2 flex-shrink-0">
+                          {editingThreshold?.address === ward.address ? (
+                            <div className="flex items-center space-x-2">
+                              <input 
+                                type="number" 
+                                className="w-20 bg-slate-950/40 border border-slate-850 rounded px-2 py-1 text-xs text-slate-200 outline-none focus:border-blue-500/50" 
+                                value={editingThreshold.amount}
+                                onChange={e => setEditingThreshold({...editingThreshold, amount: e.target.value})}
                               />
+                              <button 
+                                onClick={() => handleUpdateThreshold(ward.address, editingThreshold.amount)}
+                                disabled={isUpdatingThreshold}
+                                className="bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded text-xs transition-colors duration-300"
+                              >保存</button>
+                              <button 
+                                onClick={() => setEditingThreshold(null)}
+                                className="bg-slate-855 hover:bg-slate-800 text-slate-400 px-2 py-1 rounded text-xs transition-colors duration-300"
+                              >取消</button>
                             </div>
-                            <p className="text-[10px] text-slate-400">系统将代表被监护人发送绑定请求，并由您立即自动确认，实现一键绑定。</p>
-                          </div>
-                          <div className="flex justify-end space-x-2">
-                            <button
-                              type="button"
-                              onClick={() => setShowAddWardForm(false)}
-                              className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-xs font-bold transition-all"
-                            >
-                              取消
-                            </button>
-                            <button
-                              type="submit"
-                              disabled={isAddingWard}
-                              className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-400 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 transition-all flex items-center space-x-2"
-                            >
-                              {isAddingWard ? (
-                                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                              ) : (
-                                <span>确认添加</span>
-                              )}
-                            </button>
-                          </div>
-                        </form>
-                      )}
-
-                      {activeWards.length > 0 ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {activeWards.map((ward, idx) => (
-                            <div key={idx} className="bg-white border border-slate-100 rounded-2xl p-4 flex items-center space-x-3 shadow-sm hover:shadow-md transition-shadow">
-                              <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 flex-shrink-0">
-                                <User className="w-5 h-5" />
-                              </div>
-                              <div className="overflow-hidden flex-1">
-                                <p className="text-slate-800 font-bold text-sm truncate">{ward.accountName}</p>
-                                <p className="text-slate-500 text-[10px] font-mono leading-none mb-1">{ward.phone}</p>
-                                <p className="text-slate-400 text-[9px] font-mono truncate">{ward.address}</p>
-                                <p className="text-indigo-600 text-[11px] font-bold mt-1">当前消费阈值: {ward.threshold} 元</p>
-                              </div>
-                              <div className="flex flex-col space-y-2 flex-shrink-0">
-                                {editingThreshold?.address === ward.address ? (
-                                  <div className="flex items-center space-x-2">
-                                    <input 
-                                      type="number" 
-                                      className="w-20 border border-slate-200 rounded px-2 py-1 text-xs" 
-                                      value={editingThreshold.amount}
-                                      onChange={e => setEditingThreshold({...editingThreshold, amount: e.target.value})}
-                                    />
-                                    <button 
-                                      onClick={() => handleUpdateThreshold(ward.address, editingThreshold.amount)}
-                                      disabled={isUpdatingThreshold}
-                                      className="bg-indigo-500 hover:bg-indigo-600 text-white px-2 py-1 rounded text-xs transition-colors"
-                                    >保存</button>
-                                    <button 
-                                      onClick={() => setEditingThreshold(null)}
-                                      className="bg-slate-200 hover:bg-slate-300 text-slate-600 px-2 py-1 rounded text-xs transition-colors"
-                                    >取消</button>
-                                  </div>
-                                ) : (
-                                  <button 
-                                    onClick={() => setEditingThreshold({ address: ward.address, amount: ward.threshold })}
-                                    className="px-3 py-1.5 border border-indigo-200 hover:bg-indigo-50 text-indigo-600 rounded-xl text-xs font-bold transition-all"
-                                  >
-                                    修改阈值
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="bg-white border border-slate-100 rounded-2xl p-8 text-center">
-                          <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-400">
-                            <Users className="w-6 h-6" />
-                          </div>
-                          <p className="text-slate-800 font-bold text-sm mb-1">您尚未绑定被监护成员</p>
-                          <p className="text-slate-500 text-xs">点击右上角“添加成员”按钮，快速绑定家人账户进行监护。</p>
-                        </div>
-                      )}
-                    </div>
-
-                    <RequestList requests={pendingRequests} onAction={handleRequestAction} loading={loading} />
-                    <PendingList txs={pendingTxs} onAction={handleAction} loading={loading} />
-
-                    {/* 模拟支付宝交易测试 */}
-                    <div className="bg-slate-50 border border-slate-200/60 rounded-[32px] p-8 shadow-sm">
-                      <h4 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                        <span className="text-xl">🛒</span>
-                        <span>模拟支付宝交易测试</span>
-                      </h4>
-                      <p className="text-slate-500 text-xs mb-6">
-                        输入商品类型和金额，点击立即支付将唤起支付宝沙箱收银台进行支付体验。支付成功后，预言机将自动把交易数据记录上链。
-                      </p>
-
-                      <form onSubmit={handleAlipayPay} className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">商品类型 (上链类别)</label>
-                            <select
-                              value={alipaySubject}
-                              onChange={(e) => setAlipaySubject(e.target.value)}
-                              className="w-full bg-white border border-slate-200 focus:border-blue-500/50 rounded-xl py-3 px-4 text-slate-700 text-sm outline-none transition-all duration-300"
-                            >
-                              <option value="餐饮美食">餐饮美食 (FOOD)</option>
-                              <option value="医疗健康">医疗健康 (HLTH)</option>
-                              <option value="娱乐购物">娱乐购物 (SHOP)</option>
-                              <option value="交通出行">交通出行 (TRAV)</option>
-                            </select>
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">支付金额 (元 / Wei 1:1)</label>
-                            <input
-                              type="number"
-                              min="1"
-                              placeholder="请输入支付金额 (例如 50)"
-                              value={alipayAmount}
-                              onChange={(e) => setAlipayAmount(e.target.value)}
-                              className="w-full bg-white border border-slate-200 focus:border-blue-500/50 rounded-xl py-3 px-4 text-slate-700 text-sm outline-none transition-all duration-300"
-                              required
-                            />
-                          </div>
-                        </div>
-
-                        <button
-                          type="submit"
-                          disabled={isAlipayLoading}
-                          className="w-full mt-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-blue-400 disabled:to-indigo-400 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center space-x-2"
-                        >
-                          {isAlipayLoading ? (
-                            <>
-                              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                              <span>正在生成支付链接...</span>
-                            </>
                           ) : (
-                            <>
-                              <span>💳 立即使用支付宝付款</span>
-                            </>
+                            <button 
+                              onClick={() => setEditingThreshold({ address: ward.address, amount: ward.threshold })}
+                              className="px-3 py-1.5 border border-blue-500/20 hover:bg-blue-500/10 text-blue-400 rounded-xl text-xs font-bold transition-all duration-300"
+                            >
+                              修改阈值
+                            </button>
                           )}
-                        </button>
-                      </form>
-                    </div>
-
-                    <AiAnalysisCard txs={historyTxs} role={role} />
-
-                    <div className="bg-slate-50 border border-slate-200/60 rounded-[32px] p-8 shadow-sm">
-                      <HistoryList txs={historyTxs} />
-                    </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : (
-                  <div className="space-y-8">
-                    <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[32px] p-10 text-white shadow-xl shadow-blue-200">
-                      <h3 className="text-2xl font-bold mb-4">您的钱包已受保护</h3>
-                      <p className="text-blue-100 leading-relaxed mb-8 opacity-90">
-                        {guardianInfo 
-                          ? "系统正在实时监控您的支出。任何超过预设阈值的消费都将由您的监护人进行二次确认。" 
-                          : "系统区块链网络已连接。请尽快绑定监护人以开启智能消费预警和审批功能。"}
-                      </p>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10">
-                          <p className="text-xs font-bold text-blue-200 uppercase tracking-wider mb-1">当前状态</p>
-                          <p className="text-lg font-bold">运行中</p>
-                        </div>
-                        <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10">
-                          <p className="text-xs font-bold text-blue-200 uppercase tracking-wider mb-1">智能合约</p>
-                          <p className="text-lg font-bold">已验证</p>
-                        </div>
-                        {guardianInfo && (
-                          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 col-span-2">
-                            <p className="text-xs font-bold text-blue-200 uppercase tracking-wider mb-1">当前消费阈值 (超出需审批)</p>
-                            <p className="text-lg font-bold">{myThreshold} 元</p>
-                          </div>
-                        )}
-                      </div>
+                  <div className="bg-slate-950/40 border border-slate-850 rounded-2xl p-8 text-center">
+                    <div className="w-12 h-12 bg-slate-900 border border-slate-800 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-500">
+                      <Users className="w-6 h-6" />
                     </div>
-
-                    {/* 监护人绑定状态与管理 */}
-                    <div className="bg-slate-50 border border-slate-200/60 rounded-[32px] p-8 shadow-sm">
-                      <h4 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                        <Shield className="w-5 h-5 text-indigo-500" />
-                        <span>🛡️ 监护关系绑定管理</span>
-                      </h4>
-
-                      {guardianInfo ? (
-                        <div className="bg-white border border-slate-100 rounded-2xl p-5 flex items-center justify-between shadow-sm">
-                          <div className="flex items-center space-x-4">
-                            <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 flex-shrink-0">
-                              <User className="w-6 h-6" />
-                            </div>
-                            <div>
-                              <p className="text-slate-500 text-xs font-medium">当前监护人</p>
-                              <p className="text-slate-800 font-bold text-base">{guardianInfo.accountName}</p>
-                              <p className="text-slate-400 text-xs font-mono">{guardianInfo.phone}</p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => setShowBindForm(!showBindForm)}
-                            className="px-4 py-2 border border-slate-200 hover:border-indigo-500 hover:text-indigo-600 text-slate-600 rounded-xl text-xs font-bold transition-all"
-                          >
-                            {showBindForm ? '取消' : '更换监护人'}
-                          </button>
-                        </div>
-                      ) : pendingGuardianInfo ? (
-                        <div className="bg-amber-50/50 border border-amber-100 rounded-2xl p-5 flex items-center justify-between shadow-sm animate-pulse">
-                          <div className="flex items-center space-x-4">
-                            <div className="w-12 h-12 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 flex-shrink-0">
-                              <Clock className="w-6 h-6" />
-                            </div>
-                            <div>
-                              <p className="text-amber-600 text-xs font-medium flex items-center space-x-1">
-                                <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping mr-1"></span>
-                                等待对方确认
-                              </p>
-                              <p className="text-slate-800 font-bold text-base">{pendingGuardianInfo.accountName}</p>
-                              <p className="text-slate-400 text-xs font-mono">{pendingGuardianInfo.phone}</p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => setShowBindForm(!showBindForm)}
-                            className="px-4 py-2 border border-slate-200 hover:border-indigo-500 hover:text-indigo-600 text-slate-600 rounded-xl text-xs font-bold transition-all"
-                          >
-                            {showBindForm ? '取消' : '重新发起'}
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="bg-red-50/30 border border-dashed border-red-200 rounded-2xl p-6 text-center">
-                          <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-3 text-red-500">
-                            <AlertTriangle className="w-6 h-6" />
-                          </div>
-                          <p className="text-slate-800 font-bold text-sm mb-1">您尚未绑定监护人</p>
-                          <p className="text-slate-500 text-xs mb-4">为了保护您的钱包安全，请尽快添加并绑定一名监护人。</p>
-                          {!showBindForm && (
-                            <button
-                              onClick={() => setShowBindForm(true)}
-                              className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 transition-all flex items-center space-x-2 mx-auto"
-                            >
-                              <UserPlus className="w-4 h-4" />
-                              <span>立即添加监护人</span>
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {showBindForm && (
-                        <form onSubmit={handleBindGuardian} className="mt-4 bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4 animate-in slide-in-from-top-2 duration-300">
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">监护人手机号</label>
-                            <div className="relative group">
-                              <input
-                                type="text"
-                                placeholder="请输入已注册的监护人手机号"
-                                value={bindPhone}
-                                onChange={(e) => setBindPhone(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200/60 focus:border-indigo-500/50 rounded-xl py-3 px-4 text-slate-700 text-sm outline-none transition-all"
-                              />
-                            </div>
-                          </div>
-                          <div className="flex justify-end space-x-2">
-                            <button
-                              type="button"
-                              onClick={() => setShowBindForm(false)}
-                              className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-xs font-bold transition-all"
-                            >
-                              取消
-                            </button>
-                            <button
-                              type="submit"
-                              disabled={isBinding}
-                              className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-400 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 transition-all flex items-center space-x-2"
-                            >
-                              {isBinding ? (
-                                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                              ) : (
-                                <span>提交申请</span>
-                              )}
-                            </button>
-                          </div>
-                        </form>
-                      )}
-                    </div>
-
-                    {/* 模拟支付宝交易测试 */}
-                    <div className="bg-slate-50 border border-slate-200/60 rounded-[32px] p-8 shadow-sm">
-                      <h4 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                        <span className="text-xl">🛒</span>
-                        <span>模拟支付宝交易测试</span>
-                      </h4>
-                      <p className="text-slate-500 text-xs mb-6">
-                        输入商品类型和金额，点击立即支付将唤起支付宝沙箱收银台进行支付体验。支付成功后，预言机将自动把交易数据记录上链。
-                      </p>
-
-                      <form onSubmit={handleAlipayPay} className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">商品类型 (上链类别)</label>
-                            <select
-                              value={alipaySubject}
-                              onChange={(e) => setAlipaySubject(e.target.value)}
-                              className="w-full bg-white border border-slate-200 focus:border-blue-500/50 rounded-xl py-3 px-4 text-slate-700 text-sm outline-none transition-all duration-300"
-                            >
-                              <option value="餐饮美食">餐饮美食 (FOOD)</option>
-                              <option value="医疗健康">医疗健康 (HLTH)</option>
-                              <option value="娱乐购物">娱乐购物 (SHOP)</option>
-                              <option value="交通出行">交通出行 (TRAV)</option>
-                            </select>
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">支付金额 (元 / Wei 1:1)</label>
-                            <input
-                              type="number"
-                              min="1"
-                              placeholder="请输入支付金额 (例如 50)"
-                              value={alipayAmount}
-                              onChange={(e) => setAlipayAmount(e.target.value)}
-                              className="w-full bg-white border border-slate-200 focus:border-blue-500/50 rounded-xl py-3 px-4 text-slate-700 text-sm outline-none transition-all duration-300"
-                              required
-                            />
-                          </div>
-                        </div>
-
-                        <button
-                          type="submit"
-                          disabled={isAlipayLoading}
-                          className="w-full mt-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-blue-400 disabled:to-indigo-400 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center space-x-2"
-                        >
-                          {isAlipayLoading ? (
-                            <>
-                              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                              <span>正在生成支付链接...</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>💳 立即使用支付宝付款</span>
-                            </>
-                          )}
-                        </button>
-                      </form>
-                    </div>
-                    
-                    <AiAnalysisCard txs={historyTxs} role={role} />
-
-                    <div className="bg-slate-50 border border-slate-200/60 rounded-[32px] p-8 shadow-sm">
-                      <HistoryList txs={historyTxs} />
-                    </div>
+                    <p className="text-slate-200 font-bold text-sm mb-1">您尚未绑定被监护成员</p>
+                    <p className="text-slate-500 text-xs">点击右上角“添加成员”按钮，快速绑定家人账户进行监护。</p>
                   </div>
                 )}
               </div>
-            )}
-          </div>
+
+              <RequestList requests={pendingRequests} onAction={handleRequestAction} loading={loading} />
+              <PendingList txs={pendingTxs} onAction={handleAction} loading={loading} />
+
+              {/* 模拟支付宝交易测试 */}
+              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
+                <h4 className="text-lg font-bold text-slate-200 mb-4 flex items-center space-x-2">
+                  <span className="text-xl">🛒</span>
+                  <span>模拟支付宝交易测试</span>
+                </h4>
+                <p className="text-slate-400 text-xs mb-6">
+                  输入商品类型和金额，点击立即支付将唤起支付宝沙箱收银台进行支付体验。支付成功后，预言机将自动把交易数据记录上链。
+                </p>
+
+                <form onSubmit={handleAlipayPay} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">商品类型 (上链类别)</label>
+                      <select
+                        value={alipaySubject}
+                        onChange={(e) => setAlipaySubject(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                      >
+                        <option value="餐饮美食" className="bg-slate-900 text-white">餐饮美食 (FOOD)</option>
+                        <option value="医疗健康" className="bg-slate-900 text-white">医疗健康 (HLTH)</option>
+                        <option value="娱乐购物" className="bg-slate-900 text-white">娱乐购物 (SHOP)</option>
+                        <option value="交通出行" className="bg-slate-900 text-white">交通出行 (TRAV)</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">支付金额 (元 / Wei 1:1)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="请输入支付金额 (例如 50)"
+                        value={alipayAmount}
+                        onChange={(e) => setAlipayAmount(e.target.value)}
+                        className="w-full bg-slate-955 border border-slate-800 focus:border-blue-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isAlipayLoading}
+                    className="w-full mt-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-blue-800 disabled:to-indigo-800 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center space-x-2"
+                  >
+                    {isAlipayLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        <span>正在生成支付链接...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>💳 立即使用支付宝付款</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+
+              <AiAnalysisCard txs={historyTxs} role={role} />
+
+              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
+                <HistoryList txs={historyTxs} />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-8">
+              <div className="bg-gradient-to-br from-slate-900 via-emerald-955/20 to-slate-900 border border-emerald-500/20 rounded-[32px] p-10 text-white shadow-xl shadow-emerald-500/5 relative overflow-hidden">
+                <div className="absolute top-[-30%] right-[-10%] w-[50%] h-[50%] bg-emerald-500/10 blur-[80px] rounded-full pointer-events-none"></div>
+                <h3 className="text-2xl font-bold mb-4">您的钱包已受保护</h3>
+                <p className="text-slate-400 leading-relaxed mb-8 opacity-90 text-sm max-w-2xl font-sans">
+                  {guardianInfos.length > 0 
+                    ? "系统正在实时监控您的支出。任何超过预设阈值的消费都将由您的监护人进行二次确认。" 
+                    : "系统区块链网络已连接。请尽快绑定监护人以开启智能消费预警和审批功能。"}
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="bg-slate-950/60 backdrop-blur-md rounded-2xl p-4 border border-slate-850/60">
+                    <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-1">当前状态</p>
+                    <p className="text-lg font-bold text-slate-100">运行中</p>
+                  </div>
+                  <div className="bg-slate-950/60 backdrop-blur-md rounded-2xl p-4 border border-slate-850/60">
+                    <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-1">智能合约</p>
+                    <p className="text-lg font-bold text-slate-100">已验证</p>
+                  </div>
+                  {guardianInfos.length > 0 && (
+                    <div className="bg-slate-950/60 backdrop-blur-md rounded-2xl p-4 border border-slate-850/60 col-span-2 md:col-span-1">
+                      <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-1">当前消费阈值 (超出需审批)</p>
+                      <p className="text-lg font-bold text-emerald-400">{myThreshold} 元</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 监护人绑定状态与管理 */}
+              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
+                <h4 className="text-lg font-bold text-slate-200 mb-4 flex items-center space-x-2">
+                  <Shield className="w-5 h-5 text-emerald-400" />
+                  <span>🛡️ 监护关系绑定管理</span>
+                </h4>
+
+                {guardianInfos.length > 0 ? (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center px-1">
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">已绑定监护人 ({guardianInfos.length})</span>
+                      <button
+                        onClick={() => setShowBindForm(!showBindForm)}
+                        className="px-4 py-2 border border-slate-850 hover:border-emerald-500/30 hover:text-emerald-400 text-slate-400 rounded-xl text-xs font-bold transition-all duration-300"
+                      >
+                        {showBindForm ? '取消' : '添加监护人'}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {guardianInfos.map((g, idx) => (
+                        <div key={idx} className="bg-slate-950/40 border border-slate-850 rounded-2xl p-4 flex items-center justify-between shadow-sm hover:border-emerald-500/20 hover:bg-slate-900/20 transition-all duration-300">
+                          <div className="flex items-center space-x-3 overflow-hidden">
+                            <div className="w-10 h-10 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-center text-emerald-400 flex-shrink-0">
+                              <User className="w-5 h-5" />
+                            </div>
+                            <div className="overflow-hidden">
+                              <p className="text-slate-200 font-bold text-sm truncate">{g.accountName}</p>
+                              <p className="text-slate-400 text-[10px] font-mono leading-none mb-1">{g.phone}</p>
+                              <p className="text-slate-500 text-[9px] font-mono truncate">{g.address}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : pendingGuardianInfo ? (
+                  <div className="bg-amber-500/5 border border-amber-500/15 rounded-2xl p-5 flex items-center justify-between shadow-sm animate-pulse">
+                    <div className="flex items-center space-x-4">
+                      <div className="w-12 h-12 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-center text-amber-400 flex-shrink-0">
+                        <Clock className="w-6 h-6 animate-spin" style={{ animationDuration: '4s' }} />
+                      </div>
+                      <div>
+                        <p className="text-amber-400 text-xs font-bold flex items-center space-x-1">
+                          <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping mr-1"></span>
+                          等待对方确认
+                        </p>
+                        <p className="text-slate-200 font-bold text-base mt-0.5">{pendingGuardianInfo.accountName}</p>
+                        <p className="text-slate-400 text-xs font-mono">{pendingGuardianInfo.phone}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowBindForm(!showBindForm)}
+                      className="px-4 py-2 border border-slate-855 hover:border-emerald-500/30 hover:text-emerald-400 text-slate-400 rounded-xl text-xs font-bold transition-all duration-300"
+                    >
+                      {showBindForm ? '取消' : '重新发起'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-rose-500/5 border border-dashed border-rose-500/20 rounded-2xl p-6 text-center">
+                    <div className="w-12 h-12 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-3 text-rose-500">
+                      <AlertTriangle className="w-6 h-6" />
+                    </div>
+                    <p className="text-slate-200 font-bold text-sm mb-1">您尚未绑定监护人</p>
+                    <p className="text-slate-400 text-xs mb-4">为了保护您的钱包安全，请尽快添加并绑定一名监护人。</p>
+                    {!showBindForm && (
+                      <button
+                        onClick={() => setShowBindForm(true)}
+                        className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-6 py-2.5 rounded-xl text-xs font-bold shadow-md shadow-emerald-500/10 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] flex items-center space-x-2 mx-auto"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        <span>立即添加监护人</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {showBindForm && (
+                  <form onSubmit={handleBindGuardian} className="mt-4 bg-slate-950/60 border border-slate-850 rounded-2xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-top-2 duration-300">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">监护人手机号</label>
+                      <div className="relative group">
+                        <input
+                          type="text"
+                          placeholder="请输入已注册的监护人手机号"
+                          value={bindPhone}
+                          onChange={(e) => setBindPhone(e.target.value)}
+                          className="w-full bg-slate-900/50 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowBindForm(false)}
+                        className="px-4 py-2 border border-slate-850 bg-slate-900/20 hover:bg-slate-900/50 text-slate-400 hover:text-slate-200 rounded-xl text-xs font-bold transition-all duration-300"
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isBinding}
+                        className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md shadow-emerald-500/10 transition-all duration-300 flex items-center space-x-2"
+                      >
+                        {isBinding ? (
+                          <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        ) : (
+                          <span>提交申请</span>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+
+              {/* 扫码付款 */}
+              <div className="bg-gradient-to-br from-slate-900 via-emerald-950/10 to-slate-900 border border-emerald-500/10 rounded-[32px] p-8 text-white shadow-xl relative overflow-hidden">
+                <div className="absolute top-[-30%] right-[-10%] w-[50%] h-[50%] bg-emerald-500/5 blur-[80px] rounded-full pointer-events-none"></div>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+                  <div className="space-y-1.5">
+                    <h4 className="text-lg font-bold flex items-center space-x-2">
+                      <span className="text-xl">📷</span>
+                      <span>扫描商家收款码付款</span>
+                    </h4>
+                    <p className="text-slate-400 text-xs max-w-xl leading-relaxed font-sans">
+                      模拟扫描店内的静态收款二维码，支持动态配置消费类型的特约商户，系统会自动核对监护人设定的风控规则。
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleOpenScan}
+                    className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black px-6 py-3.5 rounded-2xl text-xs transition-all duration-300 shadow-md shadow-emerald-500/10 active:scale-95 shrink-0 hover:scale-[1.02]"
+                  >
+                    立即扫码付款
+                  </button>
+                </div>
+              </div>
+
+              {/* 模拟支付宝交易测试 */}
+              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
+                <h4 className="text-lg font-bold text-slate-200 mb-4 flex items-center space-x-2">
+                  <span className="text-xl">🛒</span>
+                  <span>模拟支付宝交易测试</span>
+                </h4>
+                <p className="text-slate-400 text-xs mb-6">
+                  输入商品类型和金额，点击立即支付将唤起支付宝沙箱收银台进行支付体验。支付成功后，预言机将自动把交易数据记录上链。
+                </p>
+
+                <form onSubmit={handleAlipayPay} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">商品类型 (上链类别)</label>
+                      <select
+                        value={alipaySubject}
+                        onChange={(e) => setAlipaySubject(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                      >
+                        <option value="餐饮美食" className="bg-slate-900 text-white">餐饮美食 (FOOD)</option>
+                        <option value="医疗健康" className="bg-slate-900 text-white">医疗健康 (HLTH)</option>
+                        <option value="娱乐购物" className="bg-slate-900 text-white">娱乐购物 (SHOP)</option>
+                        <option value="交通出行" className="bg-slate-900 text-white">交通出行 (TRAV)</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">支付金额 (元 / Wei 1:1)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="请输入支付金额 (例如 50)"
+                        value={alipayAmount}
+                        onChange={(e) => setAlipayAmount(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isAlipayLoading}
+                    className="w-full mt-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:from-emerald-800 disabled:to-emerald-800 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/10 hover:shadow-emerald-500/20 transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center space-x-2"
+                  >
+                    {isAlipayLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        <span>正在生成支付链接...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>💳 立即使用支付宝付款</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+              
+              <AiAnalysisCard txs={historyTxs} role={role} />
+
+              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
+                <HistoryList txs={historyTxs} />
+              </div>
+            </div>
+          )}
         </div>
-        
-        <div className="mt-8 text-center">
-          <p className="text-gray-400 text-sm font-medium">
+
+        <div className="mt-8 text-center border-t border-slate-900 pt-6">
+          <p className="text-slate-600 text-xs font-bold uppercase tracking-wider">
             Blockchain Empowerment • Guardianship Safety Protocol v1.0
           </p>
         </div>
       </div>
+
       {/* 支付宝扫码支付弹窗 */}
       {showQrModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          {/* 背景遮罩 */}
-          <div 
-            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
-          ></div>
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"></div>
           
-          {/* 模态框卡片 */}
-          <div className="relative bg-white/90 backdrop-blur-lg border border-white rounded-[32px] max-w-sm w-full p-8 text-center shadow-2xl shadow-slate-900/30 animate-in zoom-in-95 duration-200">
-            {/* 头部 */}
+          <div className="relative bg-slate-900 border border-slate-800/80 rounded-[32px] max-w-sm w-full p-8 text-center shadow-2xl shadow-slate-950/50 animate-in zoom-in-95 duration-200 text-slate-200">
             <div className="flex items-center justify-center space-x-2.5 mb-6">
               <div className="w-10 h-10 bg-blue-500 rounded-2xl flex items-center justify-center shadow-md shadow-blue-500/20">
-                <span className="text-white text-xl font-bold">支</span>
+                <span className="text-slate-950 text-xl font-black">支</span>
               </div>
               <div className="text-left">
-                <h3 className="font-extrabold text-slate-800 text-lg">支付宝扫码支付</h3>
-                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Alipay Sandbox QR Pay</p>
+                <h3 className="font-extrabold text-white text-lg">支付宝扫码支付</h3>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Alipay Sandbox QR Pay</p>
               </div>
             </div>
 
-            {/* 二维码容器 */}
-            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 mb-6 inline-block shadow-inner">
+            <div className="bg-slate-950/60 border border-slate-850 rounded-[24px] p-5 mb-6 inline-block shadow-inner">
               {qrCodeUrl ? (
                 <img 
                   src={qrCodeUrl} 
                   alt="支付二维码" 
-                  className="w-48 h-48 mx-auto rounded-lg select-none"
+                  className="w-48 h-48 mx-auto rounded-lg select-none object-contain"
                   style={{ imageRendering: 'pixelated' }}
                 />
               ) : (
                 <div className="w-48 h-48 flex items-center justify-center">
-                  <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div>
+                  <div className="w-8 h-8 border-4 border-slate-800 border-t-blue-500 rounded-full animate-spin"></div>
                 </div>
               )}
             </div>
 
-            {/* 状态文字和加载动画 */}
             <div className="flex flex-col items-center justify-center space-y-2 mb-6">
               <div className="flex items-center justify-center space-x-2">
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-ping"></div>
-                <p className="text-sm font-bold text-slate-600 animate-pulse">正在等待支付，请扫码...</p>
+                <div className={`w-2 h-2 rounded-full animate-ping ${role === 'ward' ? 'bg-emerald-500' : 'bg-blue-500'}`}></div>
+                <p className="text-sm font-bold text-slate-300 animate-pulse">正在等待支付，请扫码...</p>
               </div>
-              <div className="flex items-center space-x-1.5 bg-slate-100/80 px-3 py-1 rounded-full text-[11px] font-bold text-slate-500">
-                <Clock className="w-3.5 h-3.5 text-blue-500 animate-spin" style={{ animationDuration: '3s' }} />
-                <span>二维码将在 <span className="text-blue-600 font-mono font-extrabold">{qrCountdown}</span> 秒后自动刷新</span>
+              <div className="flex items-center space-x-1.5 bg-slate-950/60 border border-slate-850 px-3 py-1.5 rounded-full text-[10px] font-bold text-slate-400">
+                <Clock className="w-3.5 h-3.5 text-blue-400 animate-spin" style={{ animationDuration: '3s' }} />
+                <span>二维码将在 <span className="text-blue-400 font-mono font-extrabold">{qrCountdown}</span> 秒后自动刷新</span>
               </div>
             </div>
 
-            {/* 提示 */}
-            <p className="text-xs text-slate-400 mb-6 leading-relaxed">
+            <p className="text-xs text-slate-500 mb-6 leading-relaxed">
               请打开手机上的支付宝沙箱版 App，扫描上方二维码完成支付。支付成功后，系统将自动记录并归档上链。
             </p>
 
-            {/* 按钮 */}
             <button
               onClick={handleCloseQrModal}
-              className="w-full bg-slate-100 hover:bg-slate-200/80 active:scale-[0.98] text-slate-600 hover:text-slate-800 font-bold py-3.5 px-6 rounded-xl transition-all duration-200 text-sm shadow-sm"
+              className="w-full bg-slate-950 border border-slate-850 hover:bg-slate-900/40 active:scale-[0.98] text-slate-400 hover:text-slate-200 font-bold py-3.5 px-6 rounded-xl transition-all duration-300 text-sm shadow-sm"
             >
               取消支付
             </button>
           </div>
         </div>
       )}
-      <ToastContainer hideProgressBar />
+
+      {/* 仿真扫码付款弹窗 */}
+      {showScanModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setShowScanModal(false)}></div>
+          <div className="relative bg-slate-900 border border-slate-800/80 rounded-[32px] max-w-md w-full p-8 shadow-2xl shadow-slate-955/50 animate-in zoom-in-95 duration-200 text-slate-200">
+            <h3 className="font-extrabold text-white text-lg mb-2 flex items-center space-x-2">
+              <span>📷 扫描静态商户收款码</span>
+            </h3>
+            <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+              在此粘贴或输入商家的收款二维码内容（JSON 字符），或者直接点击下方“扫描”检测到的附近静态码。
+            </p>
+
+            {!scannedMerchant ? (
+              <div className="space-y-6">
+                <div className="relative bg-slate-950 aspect-video rounded-2xl overflow-hidden border border-slate-850 flex flex-col items-center justify-center shadow-inner group">
+                  <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent animate-bounce" style={{ animationDuration: '3s' }}></div>
+                  <div className="absolute inset-0 border-[3px] border-dashed border-emerald-500/20 rounded-2xl m-4 pointer-events-none"></div>
+                  
+                  {isScanning ? (
+                    <div className="text-center space-y-2">
+                      <div className="w-8 h-8 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto"></div>
+                      <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-wider">正在识别收款码...</p>
+                    </div>
+                  ) : (
+                    <div className="text-center space-y-1 z-10 px-4">
+                      <QrCode className="w-8 h-8 text-emerald-500/60 mx-auto mb-2 animate-pulse" />
+                      <p className="text-xs font-bold text-slate-400">对准商家的收款二维码</p>
+                      <p className="text-[9px] text-slate-600">或在下方直接选择附近模拟检测到的商户</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2 text-left">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">手动输入收款码文本</label>
+                  <div className="flex space-x-2">
+                    <input 
+                      type="text" 
+                      placeholder='例如: {"merchantAddress": "0x...", "merchantName": "王五", "merchantType": "FOOD"}'
+                      value={scanInput}
+                      onChange={(e) => setScanInput(e.target.value)}
+                      className="flex-1 bg-slate-950/40 border border-slate-850 rounded-xl px-3 py-2 text-xs outline-none focus:border-emerald-500/50 text-slate-200 transition-colors duration-300"
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => handleSimulateScan(scanInput)}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0"
+                    >
+                      解码
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2 text-left">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">检测到附近的特约商户 (模拟)</label>
+                  <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSimulateScan({
+                        merchantAddress: "0x90F79bf6eb2c4f870365E785982E1f101E93b906",
+                        merchantName: "特约商户 (王五)",
+                        merchantType: localStorage.getItem("merchant_category_0x90F79bf6eb2c4f870365E785982E1f101E93b906") || "餐饮美食"
+                      })}
+                      className="w-full bg-slate-950/40 hover:bg-emerald-500/5 border border-slate-850 hover:border-emerald-500/20 rounded-xl p-3 flex items-center justify-between text-left transition-all duration-300 group"
+                    >
+                      <div className="flex items-center space-x-3 overflow-hidden">
+                        <div className="w-8 h-8 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center justify-center text-emerald-400 flex-shrink-0 group-hover:bg-emerald-500/20 transition-colors">
+                          <ShoppingBag className="w-4 h-4" />
+                        </div>
+                        <div className="overflow-hidden">
+                          <p className="text-slate-200 font-bold text-xs truncate group-hover:text-white transition-colors">特约商户 (王五)</p>
+                          <p className="text-[9px] text-slate-500 font-mono">0x90F7...b906</p>
+                        </div>
+                      </div>
+                      <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black px-2 py-0.5 rounded shrink-0">
+                        {localStorage.getItem("merchant_category_0x90F79bf6eb2c4f870365E785982E1f101E93b906") || "餐饮美食"}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleScanPay} className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+                <div className="bg-slate-950/60 border border-slate-850/80 rounded-2xl p-4 text-left">
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">收款商户</p>
+                  <h4 className="text-base font-extrabold text-slate-200 mt-0.5">{scannedMerchant.merchantName}</h4>
+                  <p className="text-[10px] text-slate-500 font-mono mt-0.5">{scannedMerchant.merchantAddress}</p>
+                  <div className="mt-3 flex items-center space-x-2">
+                    <span className="text-[10px] text-slate-500 font-bold">主营类目:</span>
+                    <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded">
+                      {scannedMerchant.merchantType}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-2 text-left">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">付款金额 (元 / Wei 1:1)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="请输入付款金额"
+                    value={scanAmount}
+                    onChange={(e) => setScanAmount(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                <div className="flex space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setScannedMerchant(null)}
+                    className="flex-1 py-3 border border-slate-850 bg-slate-950 text-slate-400 hover:text-slate-200 hover:bg-slate-900/40 rounded-xl text-xs font-bold transition-all duration-300"
+                  >
+                    重扫
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isScanPaying}
+                    className="flex-[2] bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-3 rounded-xl text-xs shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/20 transition-all duration-300 flex items-center justify-center space-x-2"
+                  >
+                    {isScanPaying ? (
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    ) : (
+                      <span>确认付款</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+      <ToastContainer hideProgressBar limit={3} autoClose={2000} theme="dark" newestOnTop />
     </div>
   );
 }

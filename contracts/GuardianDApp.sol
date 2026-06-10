@@ -32,8 +32,11 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         bool isApproved;
     }
 
-    /// @notice 被监护人地址 => 监护人地址
-    mapping(address => address) public wardToGuardian;
+    /// @notice 被监护人地址 => 监护人地址列表
+    mapping(address => address[]) public wardGuardiansList;
+    
+    /// @notice 被监护人地址 => 监护人地址 => 是否是其监护人
+    mapping(address => mapping(address => bool)) public isWardGuardian;
     
     /// @notice 被监护人地址 => 申请中的监护人地址
     mapping(address => address) public pendingWardToGuardian;
@@ -101,13 +104,35 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice 为向后兼容保留的旧方法，获取第一个监护人地址
+     * @param _ward 被监护人地址
+     */
+    function wardToGuardian(address _ward) external view returns (address) {
+        if (wardGuardiansList[_ward].length > 0) {
+            return wardGuardiansList[_ward][0];
+        }
+        return address(0);
+    }
+
+    /**
+     * @notice 获取被监护人绑定的所有监护人列表
+     * @param _ward 被监护人地址
+     */
+    function getWardGuardians(address _ward) external view returns (address[] memory) {
+        return wardGuardiansList[_ward];
+    }
+
+    /**
      * @notice 监护人同意绑定申请
      * @param _ward 发起申请的被监护人地址
      */
     function acceptGuardianship(address _ward) external {
         require(pendingWardToGuardian[_ward] == msg.sender, "GuardianDApp: No pending request for you");
         
-        wardToGuardian[_ward] = msg.sender;
+        if (!isWardGuardian[_ward][msg.sender]) {
+            wardGuardiansList[_ward].push(msg.sender);
+            isWardGuardian[_ward][msg.sender] = true;
+        }
         isGuardian[msg.sender] = true;
         delete pendingWardToGuardian[_ward];
         
@@ -130,7 +155,10 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
      * @notice 管理员手动绑定（保留用于初始化）
      */
     function bindGuardian(address _ward, address _guardian) external onlyOwner {
-        wardToGuardian[_ward] = _guardian;
+        if (!isWardGuardian[_ward][_guardian]) {
+            wardGuardiansList[_ward].push(_guardian);
+            isWardGuardian[_ward][_guardian] = true;
+        }
         isGuardian[_guardian] = true;
         emit GuardianBound(_ward, _guardian);
     }
@@ -150,7 +178,7 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
      * @param _amount 阈值金额
      */
     function setGuardianThreshold(address _ward, uint256 _amount) external {
-        require(wardToGuardian[_ward] == msg.sender, "GuardianDApp: Not the authorized guardian");
+        require(isWardGuardian[_ward][msg.sender], "GuardianDApp: Not the authorized guardian");
         threshold[_ward] = _amount;
         emit ThresholdSet(_ward, _amount);
     }
@@ -184,7 +212,7 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         
         // 核心逻辑：商户黑名单拦截，或者金额超过阈值，并且已经绑定了监护人，则进入 Pending
         bool isBanned = bannedMerchants[_merchantType];
-        bool isPending = (isBanned || (_amount > currentThreshold)) && (wardToGuardian[_ward] != address(0));
+        bool isPending = (isBanned || (_amount > currentThreshold)) && (wardGuardiansList[_ward].length > 0);
 
         transactions[txCounter] = Transaction({
             id: txCounter,
@@ -239,7 +267,7 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         
         require(txn.id != 0, "GuardianDApp: Tx not found");
         require(txn.isPending, "GuardianDApp: Not a pending transaction");
-        require(wardToGuardian[txn.ward] == msg.sender, "GuardianDApp: Not the authorized guardian");
+        require(isWardGuardian[txn.ward][msg.sender], "GuardianDApp: Not the authorized guardian");
 
         txn.isPending = false;
         txn.isApproved = _approve;
@@ -260,7 +288,7 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         uint256 count = 0;
         // 统计数量以分配内存空间
         for (uint256 i = 1; i <= txCounter; i++) {
-            if (transactions[i].isPending && wardToGuardian[transactions[i].ward] == _guardian) {
+            if (transactions[i].isPending && isWardGuardian[transactions[i].ward][_guardian]) {
                 count++;
             }
         }
@@ -268,7 +296,7 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         uint256[] memory pendingIds = new uint256[](count);
         uint256 currentIndex = 0;
         for (uint256 i = 1; i <= txCounter; i++) {
-            if (transactions[i].isPending && wardToGuardian[transactions[i].ward] == _guardian) {
+            if (transactions[i].isPending && isWardGuardian[transactions[i].ward][_guardian]) {
                 pendingIds[currentIndex] = i;
                 currentIndex++;
             }

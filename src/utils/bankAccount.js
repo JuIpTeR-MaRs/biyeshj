@@ -82,6 +82,19 @@ export const seedTestAccount = () => {
   guardianAccount.accountName = "监护人 (李四)";
   guardianAccount.role = "guardian";
 
+  // 账户 C: 特约商户
+  const merchantPhone = "13900000000";
+  let merchantAccount = accounts.find(a => a.phone === merchantPhone);
+  if (!merchantAccount) {
+    merchantAccount = createLocalBankAccount(merchantPhone, "123");
+    accounts.push(merchantAccount);
+  }
+  // Force fixed address for Account #3
+  merchantAccount.address = "0x90F79bf6eb2c4f870365E785982E1f101E93b906";
+  merchantAccount.privateKey = "0x7c9f28a054e5a8722797e85c84d78627b03b223e74c83e0544b6c2057393437e";
+  merchantAccount.accountName = "特约商户 (王五)";
+  merchantAccount.role = "merchant";
+
   localStorage.setItem('bank_all_accounts', JSON.stringify(accounts));
 
   // Sync current user if they are logged in with a test account
@@ -91,6 +104,8 @@ export const seedTestAccount = () => {
       localStorage.setItem('bank_current_user', JSON.stringify(wardAccount));
     } else if (currentUser.phone === guardianPhone) {
       localStorage.setItem('bank_current_user', JSON.stringify(guardianAccount));
+    } else if (currentUser.phone === merchantPhone) {
+      localStorage.setItem('bank_current_user', JSON.stringify(merchantAccount));
     }
   }
 };

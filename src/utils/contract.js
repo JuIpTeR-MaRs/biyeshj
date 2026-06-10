@@ -6,6 +6,8 @@ export const RPC_URL = "http://127.0.0.1:8545";
 export const CONTRACT_ABI = [
   "function wardToGuardian(address) view returns (address)",
   "function pendingWardToGuardian(address) view returns (address)",
+  "function getWardGuardians(address) view returns (address[] memory)",
+  "function isWardGuardian(address,address) view returns (bool)",
   "function threshold(address) view returns (uint256)",
   "function transactions(uint256) view returns (uint256 id, address ward, uint256 amount, uint256 timestamp, string merchantType, bool isPending, bool isApproved)",
   "function txCounter() view returns (uint256)",

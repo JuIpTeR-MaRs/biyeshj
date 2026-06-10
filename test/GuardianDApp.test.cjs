@@ -121,4 +121,87 @@ describe("GuardianDApp Contract", function () {
       ).to.be.revertedWithCustomError(dapp, "OwnableUnauthorizedAccount");
     });
   });
+
+  describe("Multiple Guardians & M:N Relationships", function () {
+    let guardian2;
+    beforeEach(async function () {
+      [,, guardian, other, guardian2] = await ethers.getSigners();
+    });
+
+    it("Should allow a ward to request and bind multiple guardians", async function () {
+      // First guardian request and accept
+      await dapp.connect(ward).requestGuardian(guardian.address);
+      await dapp.connect(guardian).acceptGuardianship(ward.address);
+
+      // Second guardian request and accept
+      await dapp.connect(ward).requestGuardian(guardian2.address);
+      await dapp.connect(guardian2).acceptGuardianship(ward.address);
+
+      // Verify list of guardians
+      const list = await dapp.getWardGuardians(ward.address);
+      expect(list.length).to.equal(2);
+      expect(list[0]).to.equal(guardian.address);
+      expect(list[1]).to.equal(guardian2.address);
+
+      // Verify isWardGuardian mapping
+      expect(await dapp.isWardGuardian(ward.address, guardian.address)).to.be.true;
+      expect(await dapp.isWardGuardian(ward.address, guardian2.address)).to.be.true;
+      expect(await dapp.isWardGuardian(ward.address, other.address)).to.be.false;
+    });
+
+    it("Should allow any of the bound guardians to approve pending transaction", async function () {
+      // Bind both guardians
+      await dapp.connect(oracle).bindGuardian(ward.address, guardian.address);
+      await dapp.connect(oracle).bindGuardian(ward.address, guardian2.address);
+      await dapp.connect(ward).setThreshold(1000);
+
+      // Record a transaction that goes over threshold
+      await dapp.connect(oracle).recordPayment(ward.address, 1500, "Laptop");
+
+      // Verify transaction is pending
+      let tx = await dapp.transactions(1);
+      expect(tx.isPending).to.be.true;
+
+      // Both guardians see this transaction as pending
+      const pendingG1 = await dapp.getPendingTransactions(guardian.address);
+      const pendingG2 = await dapp.getPendingTransactions(guardian2.address);
+      expect(pendingG1.length).to.equal(1);
+      expect(pendingG2.length).to.equal(1);
+      expect(pendingG1[0]).to.equal(1n);
+      expect(pendingG2[0]).to.equal(1n);
+
+      // Guardian 2 confirms the transaction
+      await dapp.connect(guardian2).confirmTransaction(1, true);
+
+      // Verify transaction is approved and no longer pending
+      tx = await dapp.transactions(1);
+      expect(tx.isPending).to.be.false;
+      expect(tx.isApproved).to.be.true;
+    });
+
+    it("Should allow one guardian to manage multiple wards (1:N or M:N)", async function () {
+      const ward2 = other; // use other as second ward
+      // Bind guardian to ward 1
+      await dapp.connect(oracle).bindGuardian(ward.address, guardian.address);
+      // Bind guardian to ward 2
+      await dapp.connect(oracle).bindGuardian(ward2.address, guardian.address);
+
+      // Verify mappings
+      expect(await dapp.isWardGuardian(ward.address, guardian.address)).to.be.true;
+      expect(await dapp.isWardGuardian(ward2.address, guardian.address)).to.be.true;
+
+      // Set threshold and record pending transactions for both wards
+      await dapp.connect(ward).setThreshold(1000);
+      await dapp.connect(ward2).setThreshold(500);
+
+      await dapp.connect(oracle).recordPayment(ward.address, 1500, "Laptop");
+      await dapp.connect(oracle).recordPayment(ward2.address, 600, "Phone");
+
+      // Guardian should see pending transactions from both wards
+      const pending = await dapp.getPendingTransactions(guardian.address);
+      expect(pending.length).to.equal(2);
+      expect(pending[0]).to.equal(1n);
+      expect(pending[1]).to.equal(2n);
+    });
+  });
 });

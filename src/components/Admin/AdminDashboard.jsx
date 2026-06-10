@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Shield, Users, Activity, Link as LinkIcon, Sliders, Database, ArrowRight } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { AiAnalysisCard } from '../AiAnalysis/AiAnalysisCard';
+import { Navbar } from '../layout/Navbar';
 
 export const AdminDashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('users');
@@ -47,30 +48,25 @@ export const AdminDashboard = ({ onLogout }) => {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-8 font-sans selection:bg-indigo-500/30">
-      <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in zoom-in-95 duration-500">
-        
-        {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-3xl shadow-2xl">
-          <div className="flex items-center space-x-4 mb-4 md:mb-0">
-            <div className="w-14 h-14 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
-              <Shield className="w-7 h-7 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-black text-white tracking-tight">智能监护管理后台</h1>
-              <p className="text-slate-400 text-sm flex items-center mt-1">
-                <Database className="w-3.5 h-3.5 mr-1" />
-                超级管理员模式 | 全局数据概览
-              </p>
+    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-purple-500/30 font-sans relative overflow-hidden">
+      {/* Background glowing widgets */}
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] blur-[130px] rounded-full pointer-events-none duration-[6000ms] animate-pulse bg-purple-600/10"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] blur-[130px] rounded-full pointer-events-none duration-[6000ms] animate-pulse bg-indigo-600/10" style={{ animationDelay: '2s' }}></div>
+
+      <div className="max-w-6xl mx-auto py-10 px-6 relative z-10 space-y-8 animate-in fade-in zoom-in-95 duration-500">
+        {/* Navigation / Navbar Wrapper */}
+        <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] shadow-2xl overflow-hidden">
+          <Navbar currentUser={{ role: 'admin', accountName: '超级管理员', address: 'admin' }} role="admin" onLogout={onLogout} />
+        </div>
+
+        {/* Sub-header indicators */}
+        <div className="flex items-center justify-between bg-slate-900/20 border border-slate-800/60 rounded-2xl px-5 py-3 shadow-inner">
+          <div className="flex items-center space-x-3">
+            <div className="px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest bg-purple-500/10 border border-purple-500/20 text-purple-400 shadow-sm shadow-purple-500/5">
+              🛡️ 超级管理员视角
             </div>
           </div>
-          <button 
-            onClick={onLogout}
-            className="px-6 py-2.5 bg-slate-700/50 hover:bg-red-500/20 text-slate-300 hover:text-red-400 border border-slate-600/50 hover:border-red-500/30 rounded-xl text-sm font-bold transition-all flex items-center space-x-2"
-          >
-            <span>退出后台</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider font-sans">Blockchain Management Console</p>
         </div>
 
         {/* Dashboard Content */}
@@ -85,13 +81,13 @@ export const AdminDashboard = ({ onLogout }) => {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`w-full flex items-center space-x-3 px-5 py-4 rounded-2xl transition-all ${
+                  className={`w-full flex items-center space-x-3 px-5 py-4 rounded-2xl transition-all duration-300 hover:scale-[1.01] active:scale-[0.99] ${
                     isActive 
-                      ? 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shadow-lg shadow-indigo-500/5' 
-                      : 'bg-transparent border border-transparent text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+                      ? 'bg-purple-500/10 border border-purple-500/20 text-purple-400 shadow-lg shadow-purple-500/5' 
+                      : 'bg-transparent border border-transparent text-slate-400 hover:bg-slate-900/30 hover:text-slate-200'
                   }`}
                 >
-                  <Icon className={`w-5 h-5 ${isActive ? 'text-indigo-400' : 'text-slate-500'}`} />
+                  <Icon className={`w-5 h-5 ${isActive ? 'text-purple-400' : 'text-slate-500'}`} />
                   <span className="font-bold text-sm">{tab.label}</span>
                 </button>
               );
@@ -100,10 +96,10 @@ export const AdminDashboard = ({ onLogout }) => {
 
           {/* Main Panel */}
           <div className="lg:col-span-3">
-            <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 rounded-3xl p-6 min-h-[600px] shadow-2xl overflow-hidden relative">
+            <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-6 min-h-[600px] shadow-2xl overflow-hidden relative">
               {loading && (
-                <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
-                  <div className="w-10 h-10 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+                <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                  <div className="w-10 h-10 border-4 border-purple-500/20 border-t-purple-500 rounded-full animate-spin"></div>
                 </div>
               )}
 
@@ -116,9 +112,9 @@ export const AdminDashboard = ({ onLogout }) => {
                       安全视图: 密码已过滤
                     </span>
                   </div>
-                  <div className="overflow-x-auto rounded-2xl border border-slate-700/50">
+                  <div className="overflow-x-auto rounded-2xl border border-slate-800/50">
                     <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="bg-slate-800/80 text-xs uppercase font-black text-slate-400">
+                      <thead className="bg-slate-950/80 border-b border-slate-800/60 text-xs uppercase font-black text-slate-400">
                         <tr>
                           <th className="px-6 py-4">姓名</th>
                           <th className="px-6 py-4">手机号</th>
@@ -126,14 +122,14 @@ export const AdminDashboard = ({ onLogout }) => {
                           <th className="px-6 py-4">钱包地址</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-700/50 bg-slate-800/30">
+                      <tbody className="divide-y divide-slate-800/40 bg-slate-900/10">
                         {users.map((u, idx) => (
-                          <tr key={idx} className="hover:bg-slate-700/30 transition-colors">
+                          <tr key={idx} className="hover:bg-slate-900/30 transition-colors duration-200">
                             <td className="px-6 py-4 font-bold text-white">{u.accountName}</td>
                             <td className="px-6 py-4 font-mono">{u.phone}</td>
                             <td className="px-6 py-4">
-                              <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                                u.role === 'guardian' ? 'bg-purple-500/10 text-purple-400' : 'bg-blue-500/10 text-blue-400'
+                              <span className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border ${
+                                u.role === 'guardian' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
                               }`}>
                                 {u.role === 'guardian' ? '监护人' : '被监护人'}
                               </span>
@@ -157,9 +153,9 @@ export const AdminDashboard = ({ onLogout }) => {
                   
                   <AiAnalysisCard txs={dbData.transactions} role="admin" />
 
-                  <div className="overflow-x-auto rounded-2xl border border-slate-700/50">
+                  <div className="overflow-x-auto rounded-2xl border border-slate-800/50 mt-6">
                     <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="bg-slate-800/80 text-xs uppercase font-black text-slate-400">
+                      <thead className="bg-slate-950/80 border-b border-slate-800/60 text-xs uppercase font-black text-slate-400">
                         <tr>
                           <th className="px-6 py-4">ID</th>
                           <th className="px-6 py-4">被监护人地址</th>
@@ -168,14 +164,14 @@ export const AdminDashboard = ({ onLogout }) => {
                           <th className="px-6 py-4">时间</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-700/50 bg-slate-800/30">
+                      <tbody className="divide-y divide-slate-800/40 bg-slate-900/10">
                         {dbData.transactions.map((t, idx) => (
-                          <tr key={idx} className="hover:bg-slate-700/30 transition-colors">
+                          <tr key={idx} className="hover:bg-slate-900/30 transition-colors duration-200">
                             <td className="px-6 py-4 font-mono text-xs text-slate-500">#{t.id}</td>
                             <td className="px-6 py-4 font-mono text-xs">{t.ward_address}</td>
                             <td className="px-6 py-4 font-bold text-amber-400">{t.amount} 元</td>
                             <td className="px-6 py-4">
-                              <span className="px-2 py-1 bg-slate-700 rounded text-[10px] text-slate-300">
+                              <span className="px-2.5 py-1 bg-slate-800/50 border border-slate-700 rounded text-[10px] text-slate-300">
                                 {t.merchant_type}
                               </span>
                             </td>
@@ -197,9 +193,9 @@ export const AdminDashboard = ({ onLogout }) => {
               {activeTab === 'bindings' && (
                 <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
                   <h2 className="text-xl font-bold text-white mb-6">监护关系绑定情况</h2>
-                  <div className="overflow-x-auto rounded-2xl border border-slate-700/50">
+                  <div className="overflow-x-auto rounded-2xl border border-slate-800/50">
                     <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="bg-slate-800/80 text-xs uppercase font-black text-slate-400">
+                      <thead className="bg-slate-950/80 border-b border-slate-800/60 text-xs uppercase font-black text-slate-400">
                         <tr>
                           <th className="px-6 py-4">ID</th>
                           <th className="px-6 py-4">被监护人地址</th>
@@ -207,12 +203,12 @@ export const AdminDashboard = ({ onLogout }) => {
                           <th className="px-6 py-4">绑定时间</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-700/50 bg-slate-800/30">
+                      <tbody className="divide-y divide-slate-800/40 bg-slate-900/10">
                         {dbData.bindings.map((b, idx) => (
-                          <tr key={idx} className="hover:bg-slate-700/30 transition-colors">
+                          <tr key={idx} className="hover:bg-slate-900/30 transition-colors duration-200">
                             <td className="px-6 py-4 font-mono text-xs text-slate-500">#{b.id}</td>
-                            <td className="px-6 py-4 font-mono text-xs text-blue-400">{b.ward_address}</td>
-                            <td className="px-6 py-4 font-mono text-xs text-purple-400">{b.guardian_address}</td>
+                            <td className="px-6 py-4 font-mono text-xs text-emerald-400">{b.ward_address}</td>
+                            <td className="px-6 py-4 font-mono text-xs text-blue-400">{b.guardian_address}</td>
                             <td className="px-6 py-4 text-xs text-slate-400">
                               {new Date(b.created_at).toLocaleString()}
                             </td>
@@ -231,20 +227,20 @@ export const AdminDashboard = ({ onLogout }) => {
               {activeTab === 'thresholds' && (
                 <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
                   <h2 className="text-xl font-bold text-white mb-6">用户消费阈值配置</h2>
-                  <div className="overflow-x-auto rounded-2xl border border-slate-700/50">
+                  <div className="overflow-x-auto rounded-2xl border border-slate-800/50">
                     <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="bg-slate-800/80 text-xs uppercase font-black text-slate-400">
+                      <thead className="bg-slate-950/80 border-b border-slate-800/60 text-xs uppercase font-black text-slate-400">
                         <tr>
                           <th className="px-6 py-4">被监护人地址</th>
                           <th className="px-6 py-4">当前阈值 (元)</th>
                           <th className="px-6 py-4">最后更新时间</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-700/50 bg-slate-800/30">
+                      <tbody className="divide-y divide-slate-800/40 bg-slate-900/10">
                         {dbData.thresholds.map((t, idx) => (
-                          <tr key={idx} className="hover:bg-slate-700/30 transition-colors">
-                            <td className="px-6 py-4 font-mono text-xs text-blue-400">{t.ward_address}</td>
-                            <td className="px-6 py-4 font-bold text-emerald-400">{t.threshold_amount}</td>
+                          <tr key={idx} className="hover:bg-slate-900/30 transition-colors duration-200">
+                            <td className="px-6 py-4 font-mono text-xs text-emerald-400">{t.ward_address}</td>
+                            <td className="px-6 py-4 font-bold text-purple-400">{t.threshold_amount}</td>
                             <td className="px-6 py-4 text-xs text-slate-400">
                               {new Date(t.updated_at).toLocaleString()}
                             </td>

@@ -3,39 +3,39 @@ import React from 'react';
 export const PendingList = ({ txs, onAction, loading }) => (
   <div className="space-y-6">
     <div className="flex items-center justify-between">
-      <h2 className="text-xl font-bold text-gray-800 flex items-center">
+      <h2 className="text-xl font-bold text-white flex items-center">
         待处理预警
-        <span className="ml-3 bg-orange-100 text-orange-600 px-3 py-0.5 rounded-full text-sm">
+        <span className="ml-3 bg-amber-500/10 text-amber-400 border border-amber-500/20 px-3 py-0.5 rounded-full text-xs font-bold animate-pulse">
           {txs.length}
         </span>
       </h2>
     </div>
     
     {txs.length === 0 ? (
-      <div className="py-16 text-center bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">
-        <p className="text-gray-400 font-medium">暂无待处理交易，一切安全</p>
+      <div className="py-16 text-center bg-slate-950/40 rounded-[24px] border border-dashed border-slate-850">
+        <p className="text-slate-500 font-bold text-sm">暂无待处理交易，一切安全</p>
       </div>
     ) : (
       <div className="grid gap-4">
         {txs.map(tx => (
-          <div key={tx.id} className="bg-white border border-gray-100 p-5 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
+          <div key={tx.id} className="bg-slate-950/40 border border-slate-850/80 p-5 rounded-3xl shadow-lg hover:border-blue-500/20 hover:bg-slate-900/10 transition-all duration-300">
             <div className="flex justify-between items-start">
               <div className="space-y-1">
                 <div className="flex items-center space-x-2">
-                  <span className="text-2xl font-black text-gray-900">{tx.amount}</span>
-                  <span className="text-gray-400 font-bold text-sm">Wei</span>
+                  <span className="text-2xl font-black text-white">{tx.amount}</span>
+                  <span className="text-slate-500 font-bold text-sm">Wei / 元</span>
                 </div>
-                <div className="flex items-center space-x-2 text-sm text-gray-500 font-medium">
-                  <span className="bg-gray-100 px-2 py-0.5 rounded-md">{tx.merchantType}</span>
-                  <span>•</span>
-                  <span>被监护人: {tx.ward.slice(0, 8)}...</span>
+                <div className="flex items-center space-x-2 text-xs text-slate-400 font-bold mt-1.5">
+                  <span className="bg-slate-900/60 border border-slate-800 px-2 py-0.5 rounded text-slate-300">{tx.merchantType}</span>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-slate-400">成员: {tx.ward.slice(0, 8)}...</span>
                 </div>
               </div>
               <div className="flex space-x-2">
                 <button 
                   disabled={loading}
                   onClick={() => onAction(tx.id, true)}
-                  className="bg-green-500 hover:bg-green-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center transition-colors disabled:opacity-50 shadow-lg shadow-green-100"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 disabled:opacity-50 shadow-lg shadow-emerald-600/10 active:scale-95 text-lg font-black"
                   title="批准"
                 >
                   ✓
@@ -43,14 +43,14 @@ export const PendingList = ({ txs, onAction, loading }) => (
                 <button 
                   disabled={loading}
                   onClick={() => onAction(tx.id, false)}
-                  className="bg-red-500 hover:bg-red-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center transition-colors disabled:opacity-50 shadow-lg shadow-red-100"
+                  className="bg-rose-600 hover:bg-rose-500 text-white w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 disabled:opacity-50 shadow-lg shadow-rose-600/10 active:scale-95 text-lg font-black"
                   title="拒绝"
                 >
                   ✕
                 </button>
               </div>
             </div>
-            <div className="mt-4 pt-4 border-t border-gray-50 text-[10px] text-gray-300 uppercase tracking-widest font-bold">
+            <div className="mt-4 pt-4 border-t border-slate-900 text-[10px] text-slate-500 uppercase tracking-widest font-bold">
               Transaction ID: {tx.id.toString()} • {new Date(Number(tx.timestamp)*1000).toLocaleString()}
             </div>
           </div>

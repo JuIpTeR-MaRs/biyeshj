@@ -50,12 +50,52 @@ class PaymentMockService {
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI诊断报告本地存储与哈希对照表';
             `);
             console.log("📁 [MySQL] ai_reports table verified/created successfully.");
+            
+            // Migrate guardianship_bindings index to support multiple guardians
+            try {
+                // Check if uk_ward exists
+                const [indexes] = await this.dbPool.execute(
+                    "SHOW INDEX FROM guardianship_bindings WHERE Key_name = 'uk_ward'"
+                );
+                if (Array.isArray(indexes) && indexes.length > 0) {
+                    console.log("🔄 Found legacy unique key 'uk_ward', converting to multiple guardians constraint...");
+                    await this.dbPool.execute("ALTER TABLE guardianship_bindings DROP INDEX uk_ward");
+                }
+                // Check if uk_ward_guardian exists
+                const [newIndexes] = await this.dbPool.execute(
+                    "SHOW INDEX FROM guardianship_bindings WHERE Key_name = 'uk_ward_guardian'"
+                );
+                if (Array.isArray(newIndexes) && newIndexes.length === 0) {
+                    await this.dbPool.execute(
+                        "ALTER TABLE guardianship_bindings ADD UNIQUE KEY uk_ward_guardian (ward_address, guardian_address)"
+                    );
+                    console.log("✅ Added multiple guardians unique key 'uk_ward_guardian'.");
+                }
+            } catch (indexError) {
+                // If table doesn't exist yet, it will fail gracefully here
+                console.log("ℹ️ guardianship_bindings table index check skipped or table does not exist yet.");
+            }
+
+            // Migrate transactions table to add merchant_address column
+            try {
+                const [columns] = await this.dbPool.execute(
+                    "SHOW COLUMNS FROM transactions LIKE 'merchant_address'"
+                );
+                if (Array.isArray(columns) && columns.length === 0) {
+                    await this.dbPool.execute(
+                        "ALTER TABLE transactions ADD COLUMN merchant_address varchar(42) DEFAULT NULL COMMENT '收款商户钱包地址'"
+                    );
+                    console.log("✅ Added 'merchant_address' column to 'transactions' table.");
+                }
+            } catch (columnError) {
+                console.log("ℹ️ transactions column check skipped or table does not exist yet.");
+            }
         } catch (dbError) {
             console.error("❌ [MySQL] Failed to initialize ai_reports table:", dbError.message);
         }
     }
 
-    async recordOnChain(wardAddress, amount, merchantType) {
+    async recordOnChain(wardAddress, amount, merchantType, merchantAddress = null) {
         try {
             console.log(`[Oracle] Recording: ${wardAddress} - ${amount} Wei`);
             const tx = await this.contract.recordPayment(
@@ -70,8 +110,8 @@ class PaymentMockService {
             // 记录到本地 MySQL 数据库 (双重记账)
             try {
                 const [result] = await this.dbPool.execute(
-                    `INSERT INTO transactions (ward_address, amount, merchant_type, tx_hash) VALUES (?, ?, ?, ?)`,
-                    [wardAddress, amount, merchantType, txHash]
+                    `INSERT INTO transactions (ward_address, amount, merchant_type, tx_hash, merchant_address) VALUES (?, ?, ?, ?, ?)`,
+                    [wardAddress, amount, merchantType, txHash, merchantAddress]
                 );
                 console.log(`[MySQL] 成功写入本地数据库, ID: ${result.insertId}`);
             } catch (dbError) {
@@ -89,8 +129,8 @@ class PaymentMockService {
     async recordGuardianshipBinding(wardAddress, guardianAddress) {
         try {
             const [result] = await this.dbPool.execute(
-                `INSERT INTO guardianship_bindings (ward_address, guardian_address) VALUES (?, ?) ON DUPLICATE KEY UPDATE guardian_address = ?`,
-                [wardAddress, guardianAddress, guardianAddress]
+                `INSERT INTO guardianship_bindings (ward_address, guardian_address) VALUES (?, ?) ON DUPLICATE KEY UPDATE ward_address = ward_address`,
+                [wardAddress, guardianAddress]
             );
             console.log(`[MySQL] 成功写入监护关系绑定, 影响行数: ${result.affectedRows}`);
             return { success: true };

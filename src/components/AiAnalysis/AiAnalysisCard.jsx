@@ -10,7 +10,48 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
   const [txHash, setTxHash] = useState('');
   const [verificationResult, setVerificationResult] = useState(null); // 'valid', 'invalid', 'not_found', 'loading', null
 
-  const isAdmin = role === 'admin';
+  // Define color mapping classes based on role
+  let accentText = "text-indigo-400";
+  let accentTextLight = "text-indigo-300";
+  let accentBg = "bg-indigo-500";
+  let accentBgLight = "bg-indigo-500/10";
+  let accentBorder = "border-indigo-500/20";
+  let accentGradient = "from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500";
+  let accentPulse = "bg-indigo-500";
+
+  if (role === 'admin') {
+    accentText = "text-purple-400";
+    accentTextLight = "text-purple-300";
+    accentBg = "bg-purple-500";
+    accentBgLight = "bg-purple-500/10";
+    accentBorder = "border-purple-500/20";
+    accentGradient = "from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-600";
+    accentPulse = "bg-purple-500";
+  } else if (role === 'merchant') {
+    accentText = "text-amber-400";
+    accentTextLight = "text-amber-300";
+    accentBg = "bg-amber-500";
+    accentBgLight = "bg-amber-500/10";
+    accentBorder = "border-amber-500/20";
+    accentGradient = "from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500";
+    accentPulse = "bg-amber-500";
+  } else if (role === 'guardian') {
+    accentText = "text-blue-400";
+    accentTextLight = "text-blue-300";
+    accentBg = "bg-blue-500";
+    accentBgLight = "bg-blue-500/10";
+    accentBorder = "border-blue-500/20";
+    accentGradient = "from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-600";
+    accentPulse = "bg-blue-500";
+  } else if (role === 'ward') {
+    accentText = "text-emerald-400";
+    accentTextLight = "text-emerald-300";
+    accentBg = "bg-emerald-500";
+    accentBgLight = "bg-emerald-500/10";
+    accentBorder = "border-emerald-500/20";
+    accentGradient = "from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500";
+    accentPulse = "bg-emerald-500";
+  }
 
   const steps = [
     "正在梳理平台账目数据...",
@@ -120,10 +161,8 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
       // 标题 3 (###)
       if (trimmed.startsWith('###')) {
         return (
-          <h4 key={idx} className={`text-base font-extrabold mt-4 mb-2 flex items-center space-x-1.5 ${
-            isAdmin ? 'text-purple-300' : 'text-slate-800'
-          }`}>
-            <span className="w-1.5 h-4 bg-indigo-500 rounded-full"></span>
+          <h4 key={idx} className={`text-base font-extrabold mt-4 mb-2 flex items-center space-x-1.5 ${accentTextLight}`}>
+            <span className={`w-1.5 h-4 ${accentBg} rounded-full`}></span>
             <span>{trimmed.replace(/^###\s*/, '')}</span>
           </h4>
         );
@@ -132,9 +171,7 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
       // 标题 2 (##)
       if (trimmed.startsWith('##')) {
         return (
-          <h3 key={idx} className={`text-lg font-black mt-5 mb-3 border-b pb-1 ${
-            isAdmin ? 'text-purple-200 border-slate-700/50' : 'text-slate-900 border-slate-100'
-          }`}>
+          <h3 key={idx} className={`text-lg font-black mt-5 mb-3 border-b pb-1 ${accentTextLight} border-slate-800/80`}>
             {trimmed.replace(/^##\s*/, '')}
           </h3>
         );
@@ -144,7 +181,7 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
       if (trimmed.startsWith('-') || trimmed.startsWith('*')) {
         const content = trimmed.replace(/^[-*]\s*/, '');
         return (
-          <li key={idx} className="ml-4 list-disc pl-1 py-0.5 leading-relaxed text-sm">
+          <li key={idx} className="ml-4 list-disc pl-1 py-0.5 leading-relaxed text-sm text-slate-300">
             {parseBold(content)}
           </li>
         );
@@ -155,10 +192,8 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
         const content = trimmed.replace(/^\d+\.\s+/, '');
         const match = trimmed.match(/^(\d+)\.\s+/);
         return (
-          <div key={idx} className="flex items-start space-x-2 my-1 leading-relaxed text-sm">
-            <span className={`font-black text-xs px-1.5 py-0.5 rounded ${
-              isAdmin ? 'bg-purple-900/40 text-purple-400' : 'bg-indigo-50 text-indigo-600'
-            }`}>{match[1]}</span>
+          <div key={idx} className="flex items-start space-x-2 my-1 leading-relaxed text-sm text-slate-300">
+            <span className={`font-black text-xs px-1.5 py-0.5 rounded ${accentBgLight} ${accentTextLight} border ${accentBorder}`}>{match[1]}</span>
             <span className="flex-1">{parseBold(content)}</span>
           </div>
         );
@@ -171,7 +206,7 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
 
       // 普通段落
       return (
-        <p key={idx} className="leading-relaxed text-sm my-1.5">
+        <p key={idx} className="leading-relaxed text-sm my-1.5 text-slate-300">
           {parseBold(trimmed)}
         </p>
       );
@@ -184,54 +219,38 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
     return parts.map((part, index) => {
       // 奇数索引是加粗内容
       if (index % 2 === 1) {
-        return <strong key={index} className="font-extrabold text-indigo-500 mx-0.5">{part}</strong>;
+        return <strong key={index} className={`font-extrabold ${accentText} mx-0.5`}>{part}</strong>;
       }
       return part;
     });
   };
 
   return (
-    <div className={`relative overflow-hidden rounded-[32px] border transition-all duration-300 p-6 ${
-      isAdmin 
-        ? 'bg-slate-800/40 border-slate-700/60 shadow-2xl text-slate-300 hover:border-purple-500/30' 
-        : 'bg-white border-slate-200/60 shadow-md shadow-slate-100 text-slate-700 hover:border-indigo-500/20'
-    }`}>
+    <div className="relative overflow-hidden rounded-[32px] border transition-all duration-300 p-6 bg-slate-900/40 border-slate-800/60 shadow-2xl text-slate-300 hover:border-slate-800">
       {/* 霓虹流光背景挂件 */}
-      <div className={`absolute top-[-50%] right-[-30%] w-72 h-72 rounded-full blur-[100px] pointer-events-none opacity-20 transition-all ${
+      <div className={`absolute top-[-50%] right-[-30%] w-72 h-72 rounded-full blur-[100px] pointer-events-none opacity-10 transition-all ${
         loading ? 'animate-pulse scale-110' : ''
-      } ${
-        isAdmin ? 'bg-purple-500' : 'bg-blue-400'
-      }`}></div>
+      } ${accentPulse}`}></div>
 
       {/* 标题头部 */}
-      <div className="flex items-center justify-between mb-4 border-b pb-3 border-dashed border-slate-200/50">
+      <div className="flex items-center justify-between mb-4 border-b pb-3 border-dashed border-slate-800/80">
         <div className="flex items-center space-x-2.5">
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-inner ${
-            isAdmin ? 'bg-purple-500/10 text-purple-400' : 'bg-indigo-50 text-indigo-600'
-          }`}>
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-inner ${accentBgLight} ${accentText}`}>
             <Sparkles className="w-5 h-5 animate-spin" style={{ animationDuration: '6s' }} />
           </div>
           <div>
-            <h4 className={`text-base font-extrabold flex items-center space-x-1.5 ${
-              isAdmin ? 'text-white' : 'text-slate-800'
-            }`}>
+            <h4 className="text-base font-extrabold flex items-center space-x-1.5 text-white">
               <span>AI 消费习惯智能诊断</span>
-              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                isAdmin ? 'bg-purple-900/60 text-purple-400' : 'bg-indigo-100 text-indigo-600'
-              }`}>DeepSeek Powered</span>
+              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${accentBgLight} ${accentTextLight} border-${accentText}/20`}>DeepSeek Powered</span>
             </h4>
-            <p className="text-[10px] text-slate-400 mt-0.5">利用区块链全量账单，深度画像资金风险特征</p>
+            <p className="text-[10px] text-slate-500 mt-0.5">利用区块链全量账单，深度画像资金风险特征</p>
           </div>
         </div>
 
         {analysis && !loading && (
           <button 
             onClick={handleTriggerAnalysis}
-            className={`p-2 rounded-xl border flex items-center space-x-1.5 transition-all text-xs font-bold ${
-              isAdmin 
-                ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-purple-400' 
-                : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-indigo-600'
-            }`}
+            className={`p-2 rounded-xl border border-slate-800 flex items-center space-x-1.5 transition-all text-xs font-bold bg-slate-950/40 hover:bg-slate-900/60 ${accentText} active:scale-95`}
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>重新诊断</span>
@@ -246,19 +265,15 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
           <div className="py-8 text-center flex flex-col items-center justify-center animate-in fade-in duration-300">
             <div className="relative mb-5 flex items-center justify-center">
               {/* 流光渐变圈 */}
-              <div className={`absolute w-16 h-16 rounded-full border-4 border-t-transparent animate-spin ${
-                isAdmin ? 'border-purple-500/30 border-t-purple-500' : 'border-indigo-500/30 border-t-indigo-600'
-              }`}></div>
-              <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${
-                isAdmin ? 'bg-slate-800/80 text-purple-400' : 'bg-indigo-50 text-indigo-600'
-              }`}>
+              <div className={`absolute w-16 h-16 rounded-full border-4 border-t-transparent animate-spin border-slate-850 ${accentBorder} border-t-${accentText}`}></div>
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-slate-950 border border-slate-850 ${accentText}`}>
                 <Loader2 className="w-6 h-6 animate-spin" />
               </div>
             </div>
-            <p className={`text-sm font-extrabold animate-pulse ${isAdmin ? 'text-purple-300' : 'text-slate-800'}`}>
+            <p className={`text-sm font-extrabold animate-pulse ${accentTextLight}`}>
               {steps[loadingStep]}
             </p>
-            <p className="text-[11px] text-slate-400 mt-1">大约需要数秒时间，请稍候...</p>
+            <p className="text-[11px] text-slate-500 mt-1">大约需要数秒时间，请稍候...</p>
           </div>
         ) : error ? (
           /* 出错状态 */
@@ -269,16 +284,14 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
             <p className="text-sm font-bold text-red-500">{error}</p>
             <button 
               onClick={handleTriggerAnalysis}
-              className="mt-4 px-5 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold transition-colors shadow-lg shadow-red-600/10"
+              className="mt-4 px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors shadow-lg shadow-rose-600/10 active:scale-95"
             >
               点击重试
             </button>
           </div>
         ) : analysis ? (
           /* 分析结果展示 */
-          <div className={`max-h-[380px] overflow-y-auto pr-1.5 custom-scrollbar text-left animate-in slide-in-from-bottom-2 duration-500 ${
-            isAdmin ? 'text-slate-300' : 'text-slate-600'
-          }`}>
+          <div className="max-h-[380px] overflow-y-auto pr-1.5 custom-scrollbar text-left animate-in slide-in-from-bottom-2 duration-500 text-slate-300">
             <div className="space-y-1">
               {renderMarkdown(analysis)}
             </div>
@@ -286,12 +299,10 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
         ) : (
           /* 初始状态 */
           <div className="py-8 text-center flex flex-col items-center justify-center animate-in fade-in duration-300">
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-4 ${
-              isAdmin ? 'bg-purple-500/10 text-purple-400' : 'bg-indigo-50 text-indigo-500'
-            }`}>
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-4 ${accentBgLight} ${accentText}`}>
               <FileText className="w-7 h-7" />
             </div>
-            <p className={`text-sm font-bold mb-1 ${isAdmin ? 'text-white' : 'text-slate-800'}`}>
+            <p className="text-sm font-bold mb-1 text-white">
               {txs.length === 0 
                 ? "暂无消费记录可供诊断" 
                 : role === 'admin' 
@@ -299,7 +310,7 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
                   : "个人历史消费流水已同步，可进行 AI 深度诊断"
               }
             </p>
-            <p className="text-xs text-slate-400 max-w-xs mx-auto mb-6">
+            <p className="text-xs text-slate-500 max-w-xs mx-auto mb-6">
               {txs.length === 0 
                 ? "一旦被监护人发生真实消费，预言机将自动上链，此时即可使用 AI 分析。" 
                 : "大模型将从消费频次、金额阈值分布、风控审批等多个维度自动为您生成综合报告与建议。"
@@ -310,10 +321,8 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
               disabled={txs.length === 0}
               className={`px-8 py-3.5 rounded-2xl text-xs font-black uppercase tracking-wider transition-all duration-300 transform active:scale-95 shadow-md flex items-center space-x-2 ${
                 txs.length === 0
-                  ? 'bg-slate-700/30 text-slate-500 border border-slate-700/20 cursor-not-allowed'
-                  : isAdmin
-                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-purple-600/10 hover:shadow-purple-600/20'
-                    : 'bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white shadow-indigo-600/10 hover:shadow-indigo-600/20'
+                  ? 'bg-slate-900/20 text-slate-600 border border-slate-850 cursor-not-allowed'
+                  : `bg-gradient-to-r ${accentGradient} text-white shadow-lg`
               }`}
             >
               <Sparkles className="w-4 h-4" />
@@ -323,55 +332,45 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
         )}
 
         {analysis && !loading && (
-          <div className={`mt-5 p-4 rounded-2xl border transition-all ${
-            verificationResult === 'valid' 
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700'
-              : verificationResult === 'invalid'
-                ? 'bg-rose-500/10 border-rose-500/30 text-rose-700'
-                : verificationResult === 'not_found'
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-700'
-                  : isAdmin
-                    ? 'bg-slate-800/80 border-slate-700 text-slate-300'
-                    : 'bg-slate-50 border-slate-200 text-slate-600'
-          }`}>
+          <div className={`mt-5 p-4 rounded-2xl border border-slate-800/80 transition-all bg-slate-950/40 text-slate-300 hover:border-slate-800`}>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-left">
               <div>
-                <p className="text-xs font-black flex items-center gap-1.5">
+                <p className="text-xs font-black flex items-center gap-1.5 text-white">
                   <span>🛡️ AI 诊断报告链上存证校验 (SHA-256)</span>
                 </p>
                 {reportHash && (
-                  <p className="text-[10px] font-mono text-slate-400 mt-1 truncate max-w-[280px] sm:max-w-[360px]">
+                  <p className="text-[10px] font-mono text-slate-500 mt-1 truncate max-w-[280px] sm:max-w-[360px]">
                     本地计算哈希: {reportHash}
                   </p>
                 )}
                 {txHash && (
-                  <p className="text-[10px] font-mono text-slate-400 truncate max-w-[280px] sm:max-w-[360px]">
+                  <p className="text-[10px] font-mono text-slate-500 truncate max-w-[280px] sm:max-w-[360px]">
                     存证交易哈希: {txHash}
                   </p>
                 )}
               </div>
               <div className="flex-shrink-0">
                 {verificationResult === 'loading' ? (
-                  <button disabled className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-200 text-slate-400 flex items-center space-x-1">
+                  <button disabled className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 border border-slate-800 text-slate-500 flex items-center space-x-1">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     <span>正在比对...</span>
                   </button>
                 ) : verificationResult === 'valid' ? (
-                  <div className="flex items-center space-x-1 text-emerald-600 font-extrabold text-xs bg-emerald-500/20 px-3 py-1.5 rounded-xl">
+                  <div className="flex items-center space-x-1 text-emerald-400 font-extrabold text-xs bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl">
                     <span>✅ 数据未被篡改 (完全一致)</span>
                   </div>
                 ) : verificationResult === 'invalid' ? (
-                  <div className="flex items-center space-x-1 text-rose-600 font-extrabold text-xs bg-rose-500/20 px-3 py-1.5 rounded-xl">
+                  <div className="flex items-center space-x-1 text-rose-400 font-extrabold text-xs bg-rose-500/10 border border-rose-500/20 px-3 py-1.5 rounded-xl">
                     <span>❌ 报告数据已被篡改！</span>
                   </div>
                 ) : verificationResult === 'not_found' ? (
-                  <div className="flex items-center space-x-1 text-amber-600 font-extrabold text-xs bg-amber-500/20 px-3 py-1.5 rounded-xl">
+                  <div className="flex items-center space-x-1 text-amber-400 font-extrabold text-xs bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-xl">
                     <span>⚠️ 未在链上找到报告存证</span>
                   </div>
                 ) : (
                   <button 
                     onClick={handleVerifyIntegrity}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/10"
+                    className={`px-4 py-2 bg-slate-950 border border-slate-800 hover:bg-slate-900/60 ${accentText} rounded-xl text-xs font-bold transition-all shadow-md active:scale-95`}
                   >
                     验证防篡改
                   </button>

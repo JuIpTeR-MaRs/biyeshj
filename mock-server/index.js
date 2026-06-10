@@ -86,8 +86,8 @@ const realTradesBackup = new Map(); // Backup amounts for query fallback
 
 // 3. 发起支付宝沙箱支付 (预创建订单以获取二维码)
 app.post("/api/alipay/pay", async (req, res) => {
-    const { amount, subject, wardAddress } = req.body;
-    console.log(`💳 [Alipay] Precreating order for ward ${wardAddress}, amount: ${amount} Wei, category: ${subject}`);
+    const { amount, subject, wardAddress, merchantAddress } = req.body;
+    console.log(`💳 [Alipay] Precreating order for ward ${wardAddress}, amount: ${amount} Wei, category: ${subject}, merchant: ${merchantAddress}`);
     
     try {
         // --- 智能合约风控规则引擎前置校验 ---
@@ -107,7 +107,7 @@ app.post("/api/alipay/pay", async (req, res) => {
             console.log(`⚠️ [Risk Control] Intercepted! Merchant: ${subject} (${isBanned ? "Banned" : "Active"}), Amount: ${amount} (Threshold: ${currentThreshold}). Recording on-chain...`);
             
             // 直接在链上记账为 Pending 待审批，无需通过支付宝
-            const recordResult = await paymentService.recordOnChain(wardAddress, amount, subject);
+            const recordResult = await paymentService.recordOnChain(wardAddress, amount, subject, merchantAddress);
             
             if (recordResult.success) {
                 return res.json({ 
@@ -124,7 +124,8 @@ app.post("/api/alipay/pay", async (req, res) => {
         }
         
         const code = categoryCodes[subject] || "SHOP";
-        const outTradeNo = `${wardAddress.replace(/^0x/, "")}_${code}_${Date.now()}`;
+        const merchStr = merchantAddress ? merchantAddress.replace(/^0x/, "") : "0";
+        const outTradeNo = `${wardAddress.replace(/^0x/, "")}_${code}_${merchStr}_${Date.now()}`;
         const result = await alipaySdk.exec('alipay.trade.precreate', {
             bizContent: {
                 outTradeNo: outTradeNo,
@@ -216,13 +217,17 @@ app.get("/api/alipay/query", async (req, res) => {
         if (trade.status === 'TRADE_SUCCESS') {
             if (!processingTrades.has(outTradeNo)) {
                 const processPromise = (async () => {
-                    const [addressRaw, code, timestamp] = outTradeNo.split("_");
+                    const parts = outTradeNo.split("_");
+                    const addressRaw = parts[0];
+                    const code = parts[1];
+                    const merchRaw = parts[2];
                     const wardAddress = "0x" + addressRaw;
+                    const merchantAddress = merchRaw !== "0" ? "0x" + merchRaw : null;
                     const category = categoryNames[code] || "模拟消费";
                     const amount = Math.floor(parseFloat(trade.amount));
 
-                    console.log(`✅ [Mock Alipay Query] Verified success! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}`);
-                    const recordResult = await paymentService.recordOnChain(wardAddress, amount, category);
+                    console.log(`✅ [Mock Alipay Query] Verified success! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
+                    const recordResult = await paymentService.recordOnChain(wardAddress, amount, category, merchantAddress);
                     if (!recordResult.success) throw new Error(recordResult.error);
                     return true;
                 })();
@@ -261,13 +266,17 @@ app.get("/api/alipay/query", async (req, res) => {
             if (!processingTrades.has(outTradeNo)) {
                 // 将处理逻辑封装为一个 Promise
                 const processPromise = (async () => {
-                    const [addressRaw, code, timestamp] = outTradeNo.split("_");
+                    const parts = outTradeNo.split("_");
+                    const addressRaw = parts[0];
+                    const code = parts[1];
+                    const merchRaw = parts[2];
                     const wardAddress = "0x" + addressRaw;
+                    const merchantAddress = merchRaw !== "0" ? "0x" + merchRaw : null;
                     const category = categoryNames[code] || "模拟消费";
                     const amount = Math.floor(parseFloat(totalAmount));
 
-                    console.log(`✅ [Alipay Query] Verified success! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}`);
-                    const recordResult = await paymentService.recordOnChain(wardAddress, amount, category);
+                    console.log(`✅ [Alipay Query] Verified success! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
+                    const recordResult = await paymentService.recordOnChain(wardAddress, amount, category, merchantAddress);
                     
                     if (!recordResult.success) {
                         throw new Error(recordResult.error);
@@ -464,15 +473,19 @@ app.get("/api/alipay/return", async (req, res) => {
         }
 
         const outTradeNo = req.query.out_trade_no;
-        const [addressRaw, code, timestamp] = outTradeNo.split("_");
+        const parts = outTradeNo.split("_");
+        const addressRaw = parts[0];
+        const code = parts[1];
+        const merchRaw = parts[2];
         const wardAddress = "0x" + addressRaw;
+        const merchantAddress = merchRaw !== "0" ? "0x" + merchRaw : null;
         const category = categoryNames[code] || "模拟消费";
         const amount = req.query.total_amount;
 
-        console.log(`✅ [Alipay Return] Verified! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}`);
+        console.log(`✅ [Alipay Return] Verified! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
 
         // 作为预言机调用智能合约上链记账
-        const result = await paymentService.recordOnChain(wardAddress, Math.floor(parseFloat(amount)), category);
+        const result = await paymentService.recordOnChain(wardAddress, Math.floor(parseFloat(amount)), category, merchantAddress);
         
         if (result.success) {
             res.send(`
@@ -710,6 +723,8 @@ app.post("/api/analysis/consumption", async (req, res) => {
         systemPrompt = "你是一个平台级的区块链金融审计与数据分析专家。你的任务是分析智能监护平台全网的交易流水，评估全网的运行状况和潜在的系统性风险。分析应该包含：1. 全网整体交易规模与笔数分析；2. 消费商户与类别的全网集中度；3. 异常交易诊断（例如是否有刷单、过度高频交易、异常大额洗钱嫌疑）；4. 给系统管理员的运营与风控建议。使用中文，语气严谨、专业，排版精美。";
     } else if (role === 'guardian') {
         systemPrompt = "你是一个专业的家庭教育与智能监护顾问。你的任务是分析被监护成员的区块链消费行为，协助监护人了解家人的支出状况。分析应该包含：1. 成员支出的主要领域及趋势；2. 大额消费与超额触发预警的情况（哪些需要审批，哪些已自动通过）；3. 从监护人管理角度给出科学合理的干预建议（如调整阈值、沟通理财观念等）。使用中文，语气专业、客观，排版精美。";
+    } else if (role === 'merchant') {
+        systemPrompt = "你是一个专业的商业经营分析师与数据分析专家。你的任务是分析商户收到的区块链消费流水记录，帮助商户了解其营业和经营状况。分析应该包含：1. 营业额、交易笔数及客单价分析；2. 消费者付款规律与高峰期时段预测；3. 从商户角度给出具体可行的经营改善和营销推广建议（如热门商品促销、主营类目优化等）。使用中文，语气专业、客观，排版精美。";
     } else {
         systemPrompt = "你是一个贴心的家庭智能财务顾问。你的任务是根据被监护人提供的区块链消费记录，分析其消费习惯。分析应该包含：1. 消费总支出与结构占比；2. 是否存在非必要消费、大额异常支出；3. 给出温和的、鼓励性的财务规划建议（如储蓄小目标、规避超支风险）。注意使用中文，语气温和、正面，并且排版精美（使用markdown，适当加粗和列表）。";
     }

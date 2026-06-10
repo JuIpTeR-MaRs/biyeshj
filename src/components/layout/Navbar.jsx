@@ -1,8 +1,8 @@
 import React from 'react';
-import { LogOut, Shield, ShoppingBag, User, UserCheck } from 'lucide-react';
+import { LogOut, Shield, ShoppingBag, User, Bell } from 'lucide-react';
 import { maskCardNumber, logoutLocalBank } from '../../utils/bankAccount';
 
-export const Navbar = ({ currentUser, role, onLogout }) => {
+export const Navbar = ({ currentUser, role, onLogout, unreadCount = 0, onOpenMessages }) => {
   const handleLogoutAction = () => {
     logoutLocalBank();
     onLogout();
@@ -82,6 +82,22 @@ export const Navbar = ({ currentUser, role, onLogout }) => {
             </span>
           </div>
         </div>
+
+        {/* 消息中心按钮 */}
+        {onOpenMessages && (
+          <button 
+            onClick={onOpenMessages}
+            className="relative p-3 text-slate-300 hover:text-blue-400 hover:bg-blue-500/10 rounded-2xl transition-all duration-300 active:scale-95 border border-transparent hover:border-blue-500/20 group"
+          >
+            <Bell className="w-5 h-5 group-hover:animate-[wiggle_1s_ease-in-out_infinite]" />
+            {unreadCount > 0 && (
+              <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full animate-ping opacity-75"></span>
+            )}
+            {unreadCount > 0 && (
+              <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full border border-slate-900 shadow-sm shadow-rose-500/50"></span>
+            )}
+          </button>
+        )}
 
         {/* 退出按钮 */}
         <button 

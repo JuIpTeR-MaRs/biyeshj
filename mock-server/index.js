@@ -86,12 +86,30 @@ const realTradesBackup = new Map(); // Backup amounts for query fallback
 
 // 3. 发起支付宝沙箱支付 (预创建订单以获取二维码)
 app.post("/api/alipay/pay", async (req, res) => {
-    const { amount, subject, wardAddress, merchantAddress } = req.body;
+    const { amount, subject, wardAddress, merchantAddress, approvedTxId } = req.body;
     console.log(`💳 [Alipay] Precreating order for ward ${wardAddress}, amount: ${amount} Wei, category: ${subject}, merchant: ${merchantAddress}`);
     
     try {
         // --- 智能合约风控规则引擎前置校验 ---
         const contract = paymentService.contract;
+        
+        let skipRiskControl = false;
+        if (approvedTxId) {
+            console.log(`🔍 [Risk Control Check] Checking approvedTxId: ${approvedTxId} for ward: ${wardAddress}`);
+            try {
+                const txDetail = await contract.transactions(approvedTxId);
+                console.log(`🔍 [Risk Control Check] Chain Tx Details - ID: ${txDetail[0]}, Ward: ${txDetail[1]}, Amount: ${txDetail[2]}, isPending: ${txDetail[5]}, isApproved: ${txDetail[6]}`);
+                if (txDetail[6] === true && txDetail[1].toLowerCase() === wardAddress.toLowerCase()) {
+                    skipRiskControl = true;
+                    console.log(`✅ [Risk Control] Bypassing risk control for previously approved tx: ${approvedTxId}`);
+                } else {
+                    console.log(`❌ [Risk Control Check] Validation failed: isApproved=${txDetail[6]} (expected true), ward match=${txDetail[1].toLowerCase() === wardAddress.toLowerCase()}`);
+                }
+            } catch (err) {
+                console.error("Failed to verify approvedTxId on chain:", err);
+            }
+        }
+        
         const guardian = await contract.wardToGuardian(wardAddress);
         const hasGuardian = guardian !== ethers.ZeroAddress;
         
@@ -102,8 +120,8 @@ app.post("/api/alipay/pay", async (req, res) => {
         const currentThreshold = await contract.threshold(wardAddress);
         const isOverThreshold = BigInt(amount) > currentThreshold;
 
-        // 如果已绑定监护人且（触发黑名单或超额），则直接前置风控拦截
-        if (hasGuardian && (isBanned || isOverThreshold)) {
+        // 如果已绑定监护人且（触发黑名单或超额），且不是已经审批通过的订单，则直接前置风控拦截
+        if (!skipRiskControl && hasGuardian && (isBanned || isOverThreshold)) {
             console.log(`⚠️ [Risk Control] Intercepted! Merchant: ${subject} (${isBanned ? "Banned" : "Active"}), Amount: ${amount} (Threshold: ${currentThreshold}). Recording on-chain...`);
             
             // 直接在链上记账为 Pending 待审批，无需通过支付宝
@@ -125,7 +143,8 @@ app.post("/api/alipay/pay", async (req, res) => {
         
         const code = categoryCodes[subject] || "SHOP";
         const merchStr = merchantAddress ? merchantAddress.replace(/^0x/, "") : "0";
-        const outTradeNo = `${wardAddress.replace(/^0x/, "")}_${code}_${merchStr}_${Date.now()}`;
+        const approvedId = approvedTxId || "0";
+        const outTradeNo = `${wardAddress.replace(/^0x/, "")}_${code}_${merchStr}_${approvedId}_${Date.now()}`;
         const result = await alipaySdk.exec('alipay.trade.precreate', {
             bizContent: {
                 outTradeNo: outTradeNo,
@@ -221,15 +240,21 @@ app.get("/api/alipay/query", async (req, res) => {
                     const addressRaw = parts[0];
                     const code = parts[1];
                     const merchRaw = parts[2];
+                    const approvedTxIdRaw = parts[3];
                     const wardAddress = "0x" + addressRaw;
                     const merchantAddress = merchRaw !== "0" ? "0x" + merchRaw : null;
                     const category = categoryNames[code] || "模拟消费";
                     const amount = Math.floor(parseFloat(trade.amount));
 
-                    console.log(`✅ [Mock Alipay Query] Verified success! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
-                    const recordResult = await paymentService.recordOnChain(wardAddress, amount, category, merchantAddress);
-                    if (!recordResult.success) throw new Error(recordResult.error);
-                    return true;
+                    if (approvedTxIdRaw && approvedTxIdRaw !== "0") {
+                        console.log(`✅ [Mock Alipay Query] Verified success for previously approved transaction ID: ${approvedTxIdRaw}. Bypassing duplicate on-chain record.`);
+                        return true;
+                    } else {
+                        console.log(`✅ [Mock Alipay Query] Verified success! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
+                        const recordResult = await paymentService.recordOnChain(wardAddress, amount, category, merchantAddress);
+                        if (!recordResult.success) throw new Error(recordResult.error);
+                        return true;
+                    }
                 })();
                 processingTrades.set(outTradeNo, processPromise);
             }
@@ -270,18 +295,24 @@ app.get("/api/alipay/query", async (req, res) => {
                     const addressRaw = parts[0];
                     const code = parts[1];
                     const merchRaw = parts[2];
+                    const approvedTxIdRaw = parts[3];
                     const wardAddress = "0x" + addressRaw;
                     const merchantAddress = merchRaw !== "0" ? "0x" + merchRaw : null;
                     const category = categoryNames[code] || "模拟消费";
                     const amount = Math.floor(parseFloat(totalAmount));
 
-                    console.log(`✅ [Alipay Query] Verified success! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
-                    const recordResult = await paymentService.recordOnChain(wardAddress, amount, category, merchantAddress);
-                    
-                    if (!recordResult.success) {
-                        throw new Error(recordResult.error);
+                    if (approvedTxIdRaw && approvedTxIdRaw !== "0") {
+                        console.log(`✅ [Alipay Query] Verified success for previously approved transaction ID: ${approvedTxIdRaw}. Bypassing duplicate on-chain record.`);
+                        return true;
+                    } else {
+                        console.log(`✅ [Alipay Query] Verified success! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
+                        const recordResult = await paymentService.recordOnChain(wardAddress, amount, category, merchantAddress);
+                        
+                        if (!recordResult.success) {
+                            throw new Error(recordResult.error);
+                        }
+                        return true;
                     }
-                    return true;
                 })();
                 processingTrades.set(outTradeNo, processPromise);
             }
@@ -477,15 +508,20 @@ app.get("/api/alipay/return", async (req, res) => {
         const addressRaw = parts[0];
         const code = parts[1];
         const merchRaw = parts[2];
+        const approvedTxIdRaw = parts[3];
         const wardAddress = "0x" + addressRaw;
         const merchantAddress = merchRaw !== "0" ? "0x" + merchRaw : null;
         const category = categoryNames[code] || "模拟消费";
         const amount = req.query.total_amount;
 
-        console.log(`✅ [Alipay Return] Verified! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
-
-        // 作为预言机调用智能合约上链记账
-        const result = await paymentService.recordOnChain(wardAddress, Math.floor(parseFloat(amount)), category, merchantAddress);
+        let result;
+        if (approvedTxIdRaw && approvedTxIdRaw !== "0") {
+            console.log(`✅ [Alipay Return] Verified success for previously approved transaction ID: ${approvedTxIdRaw}. Bypassing duplicate on-chain record.`);
+            result = { success: true };
+        } else {
+            console.log(`✅ [Alipay Return] Verified! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
+            result = await paymentService.recordOnChain(wardAddress, Math.floor(parseFloat(amount)), category, merchantAddress);
+        }
         
         if (result.success) {
             res.send(`

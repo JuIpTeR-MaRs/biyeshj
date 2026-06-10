@@ -336,6 +336,21 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice 管理员强行审批历史交易 (仅用于数据重放恢复)
+     * @param _txId 交易 ID
+     * @param _approve 是否批准
+     */
+    function adminConfirmTransaction(uint256 _txId, bool _approve) external onlyOwner nonReentrant {
+        Transaction storage txn = transactions[_txId];
+        if (txn.id == 0) revert TransactionNotFound();
+        
+        txn.isPending = false;
+        txn.isApproved = _approve;
+        
+        // 恢复时不再重新发送事件，以免打扰前端
+    }
+
+    /**
      * @notice 获取监护人名下的所有待处理交易
      * @param _guardian 监护人地址
      * @return 待处理交易 ID 数组

@@ -85,6 +85,17 @@ async function main() {
           const receipt = await tx.wait();
           console.log(`   ✅ Restored transaction: ${row.ward_address} -> ${row.amount} Wei (New Tx Hash: ${receipt.hash})`);
           
+          // Restore approval status if column exists
+          if (row.is_approved !== undefined && row.is_pending !== undefined) {
+              if (row.is_approved == 1) {
+                  await (await dapp.adminConfirmTransaction(row.id, true)).wait();
+                  console.log(`      ↳ Restored status: Approved`);
+              } else if (row.is_pending == 0 && row.is_approved == 0) {
+                  await (await dapp.adminConfirmTransaction(row.id, false)).wait();
+                  console.log(`      ↳ Restored status: Rejected`);
+              }
+          }
+
           // Update the transaction hash in MySQL so they match
           await db.execute("UPDATE transactions SET tx_hash = ? WHERE id = ?", [receipt.hash, row.id]);
         }

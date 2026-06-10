@@ -10,7 +10,10 @@ const CONTRACT_ABI = [
     "function bannedMerchants(string) view returns (bool)",
     "function threshold(address) view returns (uint256)",
     "function wardToGuardian(address) view returns (address)",
-    "function storeAiReportHash(address _ward, string _month, bytes32 _reportHash) external"
+    "function transactions(uint256) view returns (uint256 id, address ward, uint256 amount, uint256 timestamp, string merchantType, bool isPending, bool isApproved)",
+    "function storeAiReportHash(address _ward, string _month, bytes32 _reportHash) external",
+    "event TransactionConfirmed(uint256 indexed txId, address indexed guardian)",
+    "event TransactionRejected(uint256 indexed txId, address indexed guardian)"
 ];
 
 class PaymentMockService {
@@ -90,6 +93,45 @@ class PaymentMockService {
             } catch (columnError) {
                 console.log("ℹ️ transactions column check skipped or table does not exist yet.");
             }
+            try {
+                const [columns] = await this.dbPool.execute(
+                    "SHOW COLUMNS FROM transactions LIKE 'is_approved'"
+                );
+                if (Array.isArray(columns) && columns.length === 0) {
+                    await this.dbPool.execute(
+                        "ALTER TABLE transactions ADD COLUMN is_pending BOOLEAN DEFAULT TRUE COMMENT '是否待审批', ADD COLUMN is_approved BOOLEAN DEFAULT FALSE COMMENT '是否已审批'"
+                    );
+                    console.log("✅ Added 'is_pending' and 'is_approved' columns to 'transactions' table.");
+                }
+            } catch (columnError) {
+                console.log("ℹ️ transactions status columns check skipped.");
+            }
+
+            // Setup listeners for persistence
+            this.contract.on("TransactionConfirmed", async (txId, guardian) => {
+                try {
+                    await this.dbPool.execute(
+                        "UPDATE transactions SET is_pending = 0, is_approved = 1 WHERE id = ?",
+                        [txId]
+                    );
+                    console.log(`[MySQL] Tx ${txId} marked as approved.`);
+                } catch (e) {
+                    console.error("Failed to update approved status:", e);
+                }
+            });
+
+            this.contract.on("TransactionRejected", async (txId, guardian) => {
+                try {
+                    await this.dbPool.execute(
+                        "UPDATE transactions SET is_pending = 0, is_approved = 0 WHERE id = ?",
+                        [txId]
+                    );
+                    console.log(`[MySQL] Tx ${txId} marked as rejected.`);
+                } catch (e) {
+                    console.error("Failed to update rejected status:", e);
+                }
+            });
+
         } catch (dbError) {
             console.error("❌ [MySQL] Failed to initialize ai_reports table:", dbError.message);
         }
@@ -110,7 +152,7 @@ class PaymentMockService {
             // 记录到本地 MySQL 数据库 (双重记账)
             try {
                 const [result] = await this.dbPool.execute(
-                    `INSERT INTO transactions (ward_address, amount, merchant_type, tx_hash, merchant_address) VALUES (?, ?, ?, ?, ?)`,
+                    `INSERT INTO transactions (ward_address, amount, merchant_type, tx_hash, merchant_address, is_pending, is_approved) VALUES (?, ?, ?, ?, ?, 1, 0)`,
                     [wardAddress, amount, merchantType, txHash, merchantAddress]
                 );
                 console.log(`[MySQL] 成功写入本地数据库, ID: ${result.insertId}`);

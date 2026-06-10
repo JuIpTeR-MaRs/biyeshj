@@ -19,7 +19,9 @@ export const CONTRACT_ABI = [
   "function setThreshold(uint256 _amount) external",
   "function getPendingTransactions(address _guardian) view returns (uint256[] memory)",
   "event PaymentPendingApproval(uint256 indexed txId, address indexed ward, uint256 amount)",
-  "event ThresholdSet(address indexed ward, uint256 amount)"
+  "event ThresholdSet(address indexed ward, uint256 amount)",
+  "event TransactionConfirmed(uint256 indexed txId, address indexed guardian)",
+  "event TransactionRejected(uint256 indexed txId, address indexed guardian)"
 ];
 
 /**

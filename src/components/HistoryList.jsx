@@ -1,6 +1,6 @@
 import React from 'react';
 
-export const HistoryList = ({ txs }) => {
+export const HistoryList = ({ txs, role, onContinuePay }) => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -32,10 +32,21 @@ export const HistoryList = ({ txs }) => {
             } else if (tx.isApproved) {
               borderGlow = "border-slate-850 hover:border-emerald-500/30";
               statusBadge = (
-                <span className="inline-flex items-center bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1 rounded-full text-xs font-black">
-                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1.5"></span>
-                  已批准
-                </span>
+                <div className="flex flex-col items-end space-y-2">
+                  <span className="inline-flex items-center bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1 rounded-full text-xs font-black">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1.5"></span>
+                    已批准
+                  </span>
+                  {role === 'ward' && onContinuePay && !localStorage.getItem(`paid_tx_${tx.id}`) && (
+                    <button 
+                      onClick={() => onContinuePay(tx)}
+                      className="text-xs bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white px-3 py-1.5 rounded-lg shadow-md shadow-emerald-500/20 transition-transform hover:scale-105 active:scale-95 flex items-center space-x-1"
+                    >
+                      <span>继续支付</span>
+                      <span>➔</span>
+                    </button>
+                  )}
+                </div>
               );
             } else {
               borderGlow = "border-slate-850 hover:border-rose-500/30";

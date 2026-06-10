@@ -11,6 +11,7 @@ import { HistoryList } from './components/HistoryList';
 import { AdminDashboard } from './components/Admin/AdminDashboard';
 import { AiAnalysisCard } from './components/AiAnalysis/AiAnalysisCard';
 import { MerchantDashboard } from './components/Merchant/MerchantDashboard';
+import { MessageCenter } from './components/MessageCenter';
 import { getContract, CONTRACT_ADDRESS, fundAccount } from './utils/contract';
 import { getLocalBankUser } from './utils/bankAccount';
 
@@ -21,6 +22,41 @@ function App() {
   const [pendingTxs, setPendingTxs] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // 消息中心状态
+  const [messages, setMessages] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('bank_messages') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [showMessageCenter, setShowMessageCenter] = useState(false);
+  
+  const addMessage = useCallback((title, content, type) => {
+    const newMsg = {
+      id: Date.now() + Math.random().toString(36).substr(2, 5),
+      title, content, type, time: new Date().toISOString(), read: false
+    };
+    setMessages(prev => {
+      const updated = [newMsg, ...prev].slice(0, 50);
+      localStorage.setItem('bank_messages', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
+  const handleMarkAllRead = () => {
+    setMessages(prev => {
+      const updated = prev.map(m => ({ ...m, read: true }));
+      localStorage.setItem('bank_messages', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleClearMessages = () => {
+    setMessages([]);
+    localStorage.removeItem('bank_messages');
+  };
 
   // 监护人/被监护人状态
   const [guardianInfo, setGuardianInfo] = useState(null);
@@ -517,7 +553,7 @@ function App() {
               countdownIntervalRef.current = null;
             }
             setShowQrModal(false);
-            fetchData();
+            handlePaymentSuccessRef.current();
           } else if (data.status === 'FAILED') {
             clearInterval(pollIntervalRef.current);
             pollIntervalRef.current = null;
@@ -584,6 +620,69 @@ function App() {
     generatePayQrRef.current = generatePayQr;
   }, [generatePayQr]);
 
+  // 正在支付的已审批交易ID
+  const [payingTxId, setPayingTxId] = useState(null);
+  const payingTxIdRef = useRef(null);
+
+  const handlePaymentSuccess = useCallback(() => {
+    toast.success("🏆 支付宝支付成功，已安全记录并同步上链！");
+    const currentTxId = payingTxIdRef.current;
+    if (currentTxId) {
+      localStorage.setItem(`paid_tx_${currentTxId}`, 'true');
+      payingTxIdRef.current = null;
+      setPayingTxId(null);
+    }
+    fetchData();
+  }, [fetchData]);
+
+  const handlePaymentSuccessRef = useRef(handlePaymentSuccess);
+  useEffect(() => {
+    handlePaymentSuccessRef.current = handlePaymentSuccess;
+  }, [handlePaymentSuccess]);
+
+  const handleContinuePay = useCallback(async (tx) => {
+    setLoading(true);
+    payingTxIdRef.current = tx.id;
+    setPayingTxId(tx.id);
+    try {
+      const response = await fetch("/api/alipay/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: parseFloat(tx.amount),
+          subject: tx.merchantType,
+          wardAddress: account,
+          approvedTxId: tx.id
+        })
+      });
+      const data = await response.json();
+      if (data.success && data.qrCode) {
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(data.qrCode)}`;
+        setQrCodeUrl(qrUrl);
+        setQrOutTradeNo(data.outTradeNo);
+        setQrCountdown(60);
+        setShowQrModal(true);
+        startPolling(data.outTradeNo);
+      } else {
+        toast.error(data.error || "生成支付二维码失败");
+        payingTxIdRef.current = null;
+        setPayingTxId(null);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("预生成支付订单失败，请检查网络");
+      payingTxIdRef.current = null;
+      setPayingTxId(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [account, startPolling]);
+
+  const handleContinuePayRef = useRef(handleContinuePay);
+  useEffect(() => {
+    handleContinuePayRef.current = handleContinuePay;
+  }, [handleContinuePay]);
+
   useEffect(() => {
     if (showQrModal) {
       setQrCountdown(60);
@@ -642,6 +741,11 @@ function App() {
           theme: "colored"
         });
         fetchData();
+        addMessage(
+          "触发消费预警",
+          `系统拦截了一笔金额为 ${amount.toString()} Wei 的可疑消费，已提交给监护人进行审批。`,
+          "pending"
+        );
       } else if (curRole === 'guardian' && curActiveWards.some(w => w.address.toLowerCase() === ward.toLowerCase())) {
         toast.warn(`⚠️ 收到被监护成员大额消费预警: ${amount.toString()} 元`, {
           position: "top-right",
@@ -661,6 +765,11 @@ function App() {
       if (curAccount && ward.toLowerCase() === curAccount.toLowerCase()) {
         // 只通过事件触发数据刷新，不弹窗，因为 postMessage 已经处理了弹窗
         fetchData();
+        addMessage(
+          "消费自动通过",
+          `您有一笔金额为 ${amount.toString()} Wei 的安全消费已自动通过风控。`,
+          "approved"
+        );
       } else if (curRole === 'guardian' && curActiveWards.some(w => w.address.toLowerCase() === ward.toLowerCase())) {
         toast.info(`ℹ️ 被监护成员完成一笔自动允许 of 消费: ${amount.toString()} 元`, {
           position: "top-right",
@@ -670,6 +779,49 @@ function App() {
       }
     };
 
+    const onConfirmed = async (txId, guardian) => {
+      if (Date.now() - subscriptionTime < 2000) return;
+      await fetchData();
+      addMessage(
+        "消费审批通过",
+        `您的交易订单 ID:${txId} 已被监护人批准，系统已自动弹出支付界面，请尽快完成支付。`,
+        "approved"
+      );
+      
+      // Auto popup pay interface if the current user is the ward of this transaction
+      if (roleRef.current === 'ward') {
+        try {
+          const contract = await getContract();
+          const tx = await contract.transactions(txId);
+          if (tx[1].toLowerCase() === accountRef.current.toLowerCase() && tx[6] === true) {
+            toast.success(`🎉 交易 ID:${txId} 审批已通过，正在为您调起支付界面...`);
+            const txObj = {
+              id: tx[0].toString(),
+              ward: tx[1],
+              amount: tx[2].toString(),
+              timestamp: Number(tx[3]),
+              merchantType: tx[4],
+              isPending: tx[5],
+              isApproved: tx[6]
+            };
+            handleContinuePayRef.current(txObj);
+          }
+        } catch (e) {
+          console.error("Auto popup pay error:", e);
+        }
+      }
+    };
+
+    const onRejected = async (txId, guardian) => {
+      if (Date.now() - subscriptionTime < 2000) return;
+      await fetchData();
+      addMessage(
+        "消费审批拒绝",
+        `您的交易订单 ID:${txId} 已被监护人拒绝，无法继续支付。`,
+        "rejected"
+      );
+    };
+
     const setupListeners = async () => {
       if (account && isLoggedIn) {
         fetchData();
@@ -677,6 +829,8 @@ function App() {
         if (contractInstance) {
           contractInstance.on("PaymentPendingApproval", onPending);
           contractInstance.on("PaymentAutoApproved", onAutoApproved);
+          contractInstance.on("TransactionConfirmed", onConfirmed);
+          contractInstance.on("TransactionRejected", onRejected);
         }
       }
     };
@@ -688,6 +842,8 @@ function App() {
       if (contractInstance) {
         contractInstance.off("PaymentPendingApproval", onPending);
         contractInstance.off("PaymentAutoApproved", onAutoApproved);
+        contractInstance.off("TransactionConfirmed", onConfirmed);
+        contractInstance.off("TransactionRejected", onRejected);
       }
     };
   }, [account, isLoggedIn, fetchData]);
@@ -697,8 +853,7 @@ function App() {
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         const handleAlipaySuccess = () => {
-          toast.success("🏆 支付宝支付成功，已安全记录并同步上链！");
-          fetchData();
+          handlePaymentSuccessRef.current();
         };
         const handleAlipayFailure = () => {
           toast.error("❌ 支付宝支付校验失败。");
@@ -715,18 +870,17 @@ function App() {
     } catch (e) {
       console.warn("Not in Electron environment or IPC failed to initialize:", e);
     }
-  }, [fetchData]);
+  }, []);
 
   useEffect(() => {
     const handleMessage = (event) => {
       if (event.data === 'alipay-success') {
-        toast.success("🏆 支付宝支付成功，已安全记录并同步上链！");
-        fetchData();
+        handlePaymentSuccessRef.current();
       }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [fetchData]);
+  }, []);
 
   if (!isLoggedIn) {
     return <LoginPage onLogin={connectWallet} />;
@@ -754,8 +908,22 @@ function App() {
       <div className="max-w-6xl mx-auto py-10 px-6 relative z-10 space-y-8 animate-in fade-in zoom-in-95 duration-500">
         {/* Navigation / Navbar Wrapper */}
         <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] shadow-2xl overflow-hidden">
-          <Navbar currentUser={getLocalBankUser()} role={role} onLogout={handleLogout} />
+          <Navbar 
+            currentUser={getLocalBankUser()} 
+            role={role} 
+            onLogout={handleLogout} 
+            unreadCount={messages.filter(m => !m.read).length}
+            onOpenMessages={() => setShowMessageCenter(true)}
+          />
         </div>
+
+        <MessageCenter 
+          isOpen={showMessageCenter} 
+          onClose={() => setShowMessageCenter(false)} 
+          messages={messages}
+          onMarkAllRead={handleMarkAllRead}
+          onClearMessages={handleClearMessages}
+        />
 
         <div className="space-y-8">
           <div className="flex items-center justify-between bg-slate-900/20 border border-slate-700/50 rounded-2xl px-5 py-3 shadow-inner">
@@ -948,7 +1116,7 @@ function App() {
               <AiAnalysisCard txs={historyTxs} role={role} />
 
               <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl">
-                <HistoryList txs={historyTxs} />
+                <HistoryList txs={historyTxs} role={role} onContinuePay={handleContinuePay} />
               </div>
             </div>
           ) : (
@@ -1176,7 +1344,7 @@ function App() {
               <AiAnalysisCard txs={historyTxs} role={role} />
 
               <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl">
-                <HistoryList txs={historyTxs} />
+                <HistoryList txs={historyTxs} role={role} onContinuePay={handleContinuePay} />
               </div>
             </div>
           )}

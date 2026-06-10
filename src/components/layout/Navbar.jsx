@@ -55,7 +55,7 @@ export const Navbar = ({ currentUser, role, onLogout }) => {
           <h1 className="text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-slate-100 via-slate-200 to-slate-400 tracking-tight leading-none mb-0.5">
             智能监护银行
           </h1>
-          <p className="text-[9px] text-slate-500 uppercase tracking-widest font-extrabold font-mono">
+          <p className="text-[11px] text-slate-400 uppercase tracking-widest font-extrabold font-mono">
             Smart Guardianship Banking
           </p>
         </div>
@@ -64,20 +64,20 @@ export const Navbar = ({ currentUser, role, onLogout }) => {
       {/* 右侧：用户卡片、角色标签与退出 */}
       <div className="flex items-center space-x-3">
         {/* 角色 Badge */}
-        <span className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider ${badgeClass}`}>
+        <span className={`text-xs font-black px-2.5 py-1 rounded-full uppercase tracking-wider ${badgeClass}`}>
           {roleLabel}
         </span>
 
         {/* 用户信息卡 */}
-        <div className="hidden sm:flex items-center space-x-3 bg-slate-950/40 px-4 py-2 rounded-2xl border border-slate-800/80 animate-in fade-in slide-in-from-right-2 duration-300">
+        <div className="hidden sm:flex items-center space-x-3 bg-slate-955/60 px-4 py-2 rounded-2xl border border-slate-700/50 animate-in fade-in slide-in-from-right-2 duration-300">
           <div className="w-8 h-8 bg-slate-900 border border-slate-800 rounded-lg flex items-center justify-center shadow-sm">
-            <User className="w-4 h-4 text-slate-400" />
+            <User className="w-4 h-4 text-slate-300" />
           </div>
           <div className="flex flex-col text-left">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider leading-none mb-1">
+            <span className="text-xs font-black text-slate-300 uppercase tracking-wider leading-none mb-1">
               {currentUser.accountName || "已登录"}
             </span>
-            <span className="text-xs font-mono text-slate-300 font-bold leading-none">
+            <span className="text-xs font-mono text-slate-100 font-bold leading-none">
               {currentUser.cardNumber ? maskCardNumber(currentUser.cardNumber) : (currentUser.phone || currentUser.address || "")}
             </span>
           </div>
@@ -87,7 +87,7 @@ export const Navbar = ({ currentUser, role, onLogout }) => {
         <button 
           onClick={handleLogoutAction}
           title="退出登录"
-          className="p-3 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-2xl transition-all duration-300 active:scale-95 border border-transparent hover:border-red-500/20"
+          className="p-3 text-slate-300 hover:text-red-400 hover:bg-red-500/10 rounded-2xl transition-all duration-300 active:scale-95 border border-transparent hover:border-red-500/20"
         >
           <LogOut className="w-5 h-5" />
         </button>

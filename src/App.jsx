@@ -753,12 +753,12 @@ function App() {
 
       <div className="max-w-6xl mx-auto py-10 px-6 relative z-10 space-y-8 animate-in fade-in zoom-in-95 duration-500">
         {/* Navigation / Navbar Wrapper */}
-        <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] shadow-2xl overflow-hidden">
+        <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] shadow-2xl overflow-hidden">
           <Navbar currentUser={getLocalBankUser()} role={role} onLogout={handleLogout} />
         </div>
 
         <div className="space-y-8">
-          <div className="flex items-center justify-between bg-slate-900/20 border border-slate-800/60 rounded-2xl px-5 py-3 shadow-inner">
+          <div className="flex items-center justify-between bg-slate-900/20 border border-slate-700/50 rounded-2xl px-5 py-3 shadow-inner">
             <div className="flex items-center space-x-3">
               <div className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest ${
                 role === 'guardian' 
@@ -768,15 +768,15 @@ function App() {
                 {role === 'guardian' ? '🛡️ 监护人视角' : '👤 被监护人视角'}
               </div>
             </div>
-            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider font-sans">Blockchain Safety Dashboard</p>
+            <p className="text-sm text-slate-400 font-bold uppercase tracking-wider font-sans">Blockchain Safety Dashboard</p>
           </div>
 
           {role === 'guardian' ? (
             <div className="space-y-8">
               {/* 被监护人列表 */}
-              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
+              <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl">
                 <div className="flex justify-between items-center mb-6">
-                  <h4 className="text-lg font-bold text-slate-200 flex items-center space-x-2">
+                  <h4 className="text-lg font-bold text-white flex items-center space-x-2">
                     <Users className="w-5 h-5 text-blue-400" />
                     <span>👥 我管理的被监护成员</span>
                   </h4>
@@ -794,23 +794,23 @@ function App() {
                 {showAddWardForm && (
                   <form onSubmit={handleAddWard} className="mb-6 bg-slate-950/60 border border-slate-850 rounded-2xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-top-2 duration-300">
                     <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">被监护人手机号</label>
+                      <label className="text-sm font-bold text-slate-400 uppercase tracking-widest px-1">被监护人手机号</label>
                       <div className="relative group">
                         <input
                           type="text"
                           placeholder="请输入已注册的被监护人手机号"
                           value={wardPhoneInput}
                           onChange={(e) => setWardPhoneInput(e.target.value)}
-                          className="w-full bg-slate-900/50 border border-slate-800 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                          className="w-full bg-slate-900/50 border border-slate-800 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 rounded-xl py-3 px-4 text-white text-sm outline-none transition-all duration-300"
                         />
                       </div>
-                      <p className="text-[10px] text-slate-500">系统将代表被监护人发送绑定请求，并由您立即自动确认，实现一键绑定。</p>
+                      <p className="text-sm text-slate-400">系统将代表被监护人发送绑定请求，并由您立即自动确认，实现一键绑定。</p>
                     </div>
                     <div className="flex justify-end space-x-2">
                       <button
                         type="button"
                         onClick={() => setShowAddWardForm(false)}
-                        className="px-4 py-2 border border-slate-850 bg-slate-900/20 hover:bg-slate-900/50 text-slate-400 hover:text-slate-200 rounded-xl text-xs font-bold transition-all duration-300"
+                        className="px-4 py-2 border border-slate-850 bg-slate-900/20 hover:bg-slate-900/50 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-all duration-300"
                       >
                         取消
                       </button>
@@ -837,9 +837,9 @@ function App() {
                           <User className="w-5 h-5" />
                         </div>
                         <div className="overflow-hidden flex-1">
-                          <p className="text-slate-200 font-bold text-sm truncate">{ward.accountName}</p>
-                          <p className="text-slate-400 text-[10px] font-mono leading-none mb-1">{ward.phone}</p>
-                          <p className="text-slate-500 text-[9px] font-mono truncate">{ward.address}</p>
+                          <p className="text-white font-bold text-sm truncate">{ward.accountName}</p>
+                          <p className="text-slate-400 text-sm font-mono leading-none mb-1">{ward.phone}</p>
+                          <p className="text-slate-400 text-xs tracking-wide font-mono truncate">{ward.address}</p>
                           <p className="text-blue-400 text-[11px] font-bold mt-1">当前消费阈值: {ward.threshold} 元</p>
                         </div>
                         <div className="flex flex-col space-y-2 flex-shrink-0">
@@ -847,7 +847,7 @@ function App() {
                             <div className="flex items-center space-x-2">
                               <input 
                                 type="number" 
-                                className="w-20 bg-slate-950/40 border border-slate-850 rounded px-2 py-1 text-xs text-slate-200 outline-none focus:border-blue-500/50" 
+                                className="w-20 bg-slate-950/40 border border-slate-850 rounded px-2 py-1 text-xs text-white outline-none focus:border-blue-500/50" 
                                 value={editingThreshold.amount}
                                 onChange={e => setEditingThreshold({...editingThreshold, amount: e.target.value})}
                               />
@@ -875,11 +875,11 @@ function App() {
                   </div>
                 ) : (
                   <div className="bg-slate-950/40 border border-slate-850 rounded-2xl p-8 text-center">
-                    <div className="w-12 h-12 bg-slate-900 border border-slate-800 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-500">
+                    <div className="w-12 h-12 bg-slate-900 border border-slate-800 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-400">
                       <Users className="w-6 h-6" />
                     </div>
-                    <p className="text-slate-200 font-bold text-sm mb-1">您尚未绑定被监护成员</p>
-                    <p className="text-slate-500 text-xs">点击右上角“添加成员”按钮，快速绑定家人账户进行监护。</p>
+                    <p className="text-white font-bold text-sm mb-1">您尚未绑定被监护成员</p>
+                    <p className="text-slate-400 text-xs">点击右上角“添加成员”按钮，快速绑定家人账户进行监护。</p>
                   </div>
                 )}
               </div>
@@ -888,8 +888,8 @@ function App() {
               <PendingList txs={pendingTxs} onAction={handleAction} loading={loading} />
 
               {/* 模拟支付宝交易测试 */}
-              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
-                <h4 className="text-lg font-bold text-slate-200 mb-4 flex items-center space-x-2">
+              <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl">
+                <h4 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
                   <span className="text-xl">🛒</span>
                   <span>模拟支付宝交易测试</span>
                 </h4>
@@ -900,11 +900,11 @@ function App() {
                 <form onSubmit={handleAlipayPay} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">商品类型 (上链类别)</label>
+                      <label className="text-sm font-bold text-slate-400 uppercase tracking-widest px-1">商品类型 (上链类别)</label>
                       <select
                         value={alipaySubject}
                         onChange={(e) => setAlipaySubject(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500/50 rounded-xl py-3 px-4 text-white text-sm outline-none transition-all duration-300"
                       >
                         <option value="餐饮美食" className="bg-slate-900 text-white">餐饮美食 (FOOD)</option>
                         <option value="医疗健康" className="bg-slate-900 text-white">医疗健康 (HLTH)</option>
@@ -913,14 +913,14 @@ function App() {
                       </select>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">支付金额 (元 / Wei 1:1)</label>
+                      <label className="text-sm font-bold text-slate-400 uppercase tracking-widest px-1">支付金额 (元 / Wei 1:1)</label>
                       <input
                         type="number"
                         min="1"
                         placeholder="请输入支付金额 (例如 50)"
                         value={alipayAmount}
                         onChange={(e) => setAlipayAmount(e.target.value)}
-                        className="w-full bg-slate-955 border border-slate-800 focus:border-blue-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                        className="w-full bg-slate-955 border border-slate-800 focus:border-blue-500/50 rounded-xl py-3 px-4 text-white text-sm outline-none transition-all duration-300"
                         required
                       />
                     </div>
@@ -947,7 +947,7 @@ function App() {
 
               <AiAnalysisCard txs={historyTxs} role={role} />
 
-              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
+              <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl">
                 <HistoryList txs={historyTxs} />
               </div>
             </div>
@@ -980,8 +980,8 @@ function App() {
               </div>
 
               {/* 监护人绑定状态与管理 */}
-              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
-                <h4 className="text-lg font-bold text-slate-200 mb-4 flex items-center space-x-2">
+              <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl">
+                <h4 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
                   <Shield className="w-5 h-5 text-emerald-400" />
                   <span>🛡️ 监护关系绑定管理</span>
                 </h4>
@@ -989,7 +989,7 @@ function App() {
                 {guardianInfos.length > 0 ? (
                   <div className="space-y-4">
                     <div className="flex justify-between items-center px-1">
-                      <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">已绑定监护人 ({guardianInfos.length})</span>
+                      <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">已绑定监护人 ({guardianInfos.length})</span>
                       <button
                         onClick={() => setShowBindForm(!showBindForm)}
                         className="px-4 py-2 border border-slate-850 hover:border-emerald-500/30 hover:text-emerald-400 text-slate-400 rounded-xl text-xs font-bold transition-all duration-300"
@@ -1005,9 +1005,9 @@ function App() {
                               <User className="w-5 h-5" />
                             </div>
                             <div className="overflow-hidden">
-                              <p className="text-slate-200 font-bold text-sm truncate">{g.accountName}</p>
-                              <p className="text-slate-400 text-[10px] font-mono leading-none mb-1">{g.phone}</p>
-                              <p className="text-slate-500 text-[9px] font-mono truncate">{g.address}</p>
+                              <p className="text-white font-bold text-sm truncate">{g.accountName}</p>
+                              <p className="text-slate-400 text-sm font-mono leading-none mb-1">{g.phone}</p>
+                              <p className="text-slate-400 text-xs tracking-wide font-mono truncate">{g.address}</p>
                             </div>
                           </div>
                         </div>
@@ -1025,7 +1025,7 @@ function App() {
                           <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping mr-1"></span>
                           等待对方确认
                         </p>
-                        <p className="text-slate-200 font-bold text-base mt-0.5">{pendingGuardianInfo.accountName}</p>
+                        <p className="text-white font-bold text-base mt-0.5">{pendingGuardianInfo.accountName}</p>
                         <p className="text-slate-400 text-xs font-mono">{pendingGuardianInfo.phone}</p>
                       </div>
                     </div>
@@ -1041,7 +1041,7 @@ function App() {
                     <div className="w-12 h-12 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-3 text-rose-500">
                       <AlertTriangle className="w-6 h-6" />
                     </div>
-                    <p className="text-slate-200 font-bold text-sm mb-1">您尚未绑定监护人</p>
+                    <p className="text-white font-bold text-sm mb-1">您尚未绑定监护人</p>
                     <p className="text-slate-400 text-xs mb-4">为了保护您的钱包安全，请尽快添加并绑定一名监护人。</p>
                     {!showBindForm && (
                       <button
@@ -1058,14 +1058,14 @@ function App() {
                 {showBindForm && (
                   <form onSubmit={handleBindGuardian} className="mt-4 bg-slate-950/60 border border-slate-850 rounded-2xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-top-2 duration-300">
                     <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">监护人手机号</label>
+                      <label className="text-sm font-bold text-slate-400 uppercase tracking-widest px-1">监护人手机号</label>
                       <div className="relative group">
                         <input
                           type="text"
                           placeholder="请输入已注册的监护人手机号"
                           value={bindPhone}
                           onChange={(e) => setBindPhone(e.target.value)}
-                          className="w-full bg-slate-900/50 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                          className="w-full bg-slate-900/50 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-white text-sm outline-none transition-all duration-300"
                         />
                       </div>
                     </div>
@@ -1073,7 +1073,7 @@ function App() {
                       <button
                         type="button"
                         onClick={() => setShowBindForm(false)}
-                        className="px-4 py-2 border border-slate-850 bg-slate-900/20 hover:bg-slate-900/50 text-slate-400 hover:text-slate-200 rounded-xl text-xs font-bold transition-all duration-300"
+                        className="px-4 py-2 border border-slate-850 bg-slate-900/20 hover:bg-slate-900/50 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-all duration-300"
                       >
                         取消
                       </button>
@@ -1116,8 +1116,8 @@ function App() {
               </div>
 
               {/* 模拟支付宝交易测试 */}
-              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
-                <h4 className="text-lg font-bold text-slate-200 mb-4 flex items-center space-x-2">
+              <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl">
+                <h4 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
                   <span className="text-xl">🛒</span>
                   <span>模拟支付宝交易测试</span>
                 </h4>
@@ -1128,11 +1128,11 @@ function App() {
                 <form onSubmit={handleAlipayPay} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">商品类型 (上链类别)</label>
+                      <label className="text-sm font-bold text-slate-400 uppercase tracking-widest px-1">商品类型 (上链类别)</label>
                       <select
                         value={alipaySubject}
                         onChange={(e) => setAlipaySubject(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-white text-sm outline-none transition-all duration-300"
                       >
                         <option value="餐饮美食" className="bg-slate-900 text-white">餐饮美食 (FOOD)</option>
                         <option value="医疗健康" className="bg-slate-900 text-white">医疗健康 (HLTH)</option>
@@ -1141,14 +1141,14 @@ function App() {
                       </select>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">支付金额 (元 / Wei 1:1)</label>
+                      <label className="text-sm font-bold text-slate-400 uppercase tracking-widest px-1">支付金额 (元 / Wei 1:1)</label>
                       <input
                         type="number"
                         min="1"
                         placeholder="请输入支付金额 (例如 50)"
                         value={alipayAmount}
                         onChange={(e) => setAlipayAmount(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-white text-sm outline-none transition-all duration-300"
                         required
                       />
                     </div>
@@ -1175,7 +1175,7 @@ function App() {
               
               <AiAnalysisCard txs={historyTxs} role={role} />
 
-              <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-[32px] p-8 shadow-2xl">
+              <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl">
                 <HistoryList txs={historyTxs} />
               </div>
             </div>
@@ -1194,14 +1194,14 @@ function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"></div>
           
-          <div className="relative bg-slate-900 border border-slate-800/80 rounded-[32px] max-w-sm w-full p-8 text-center shadow-2xl shadow-slate-950/50 animate-in zoom-in-95 duration-200 text-slate-200">
+          <div className="relative bg-slate-900 border border-slate-800/80 rounded-[32px] max-w-sm w-full p-8 text-center shadow-2xl shadow-slate-950/50 animate-in zoom-in-95 duration-200 text-white">
             <div className="flex items-center justify-center space-x-2.5 mb-6">
               <div className="w-10 h-10 bg-blue-500 rounded-2xl flex items-center justify-center shadow-md shadow-blue-500/20">
                 <span className="text-slate-950 text-xl font-black">支</span>
               </div>
               <div className="text-left">
                 <h3 className="font-extrabold text-white text-lg">支付宝扫码支付</h3>
-                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Alipay Sandbox QR Pay</p>
+                <p className="text-sm text-slate-400 font-bold uppercase tracking-wider">Alipay Sandbox QR Pay</p>
               </div>
             </div>
 
@@ -1225,19 +1225,19 @@ function App() {
                 <div className={`w-2 h-2 rounded-full animate-ping ${role === 'ward' ? 'bg-emerald-500' : 'bg-blue-500'}`}></div>
                 <p className="text-sm font-bold text-slate-300 animate-pulse">正在等待支付，请扫码...</p>
               </div>
-              <div className="flex items-center space-x-1.5 bg-slate-950/60 border border-slate-850 px-3 py-1.5 rounded-full text-[10px] font-bold text-slate-400">
+              <div className="flex items-center space-x-1.5 bg-slate-950/60 border border-slate-850 px-3 py-1.5 rounded-full text-sm font-bold text-slate-400">
                 <Clock className="w-3.5 h-3.5 text-blue-400 animate-spin" style={{ animationDuration: '3s' }} />
                 <span>二维码将在 <span className="text-blue-400 font-mono font-extrabold">{qrCountdown}</span> 秒后自动刷新</span>
               </div>
             </div>
 
-            <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+            <p className="text-xs text-slate-400 mb-6 leading-relaxed">
               请打开手机上的支付宝沙箱版 App，扫描上方二维码完成支付。支付成功后，系统将自动记录并归档上链。
             </p>
 
             <button
               onClick={handleCloseQrModal}
-              className="w-full bg-slate-950 border border-slate-850 hover:bg-slate-900/40 active:scale-[0.98] text-slate-400 hover:text-slate-200 font-bold py-3.5 px-6 rounded-xl transition-all duration-300 text-sm shadow-sm"
+              className="w-full bg-slate-950 border border-slate-850 hover:bg-slate-900/70 active:scale-[0.98] text-slate-400 hover:text-white font-bold py-3.5 px-6 rounded-xl transition-all duration-300 text-sm shadow-sm"
             >
               取消支付
             </button>
@@ -1249,11 +1249,11 @@ function App() {
       {showScanModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setShowScanModal(false)}></div>
-          <div className="relative bg-slate-900 border border-slate-800/80 rounded-[32px] max-w-md w-full p-8 shadow-2xl shadow-slate-955/50 animate-in zoom-in-95 duration-200 text-slate-200">
+          <div className="relative bg-slate-900 border border-slate-800/80 rounded-[32px] max-w-md w-full p-8 shadow-2xl shadow-slate-955/50 animate-in zoom-in-95 duration-200 text-white">
             <h3 className="font-extrabold text-white text-lg mb-2 flex items-center space-x-2">
               <span>📷 扫描静态商户收款码</span>
             </h3>
-            <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+            <p className="text-xs text-slate-400 mb-6 leading-relaxed">
               在此粘贴或输入商家的收款二维码内容（JSON 字符），或者直接点击下方“扫描”检测到的附近静态码。
             </p>
 
@@ -1266,26 +1266,26 @@ function App() {
                   {isScanning ? (
                     <div className="text-center space-y-2">
                       <div className="w-8 h-8 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto"></div>
-                      <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-wider">正在识别收款码...</p>
+                      <p className="text-sm text-emerald-500 font-bold uppercase tracking-wider">正在识别收款码...</p>
                     </div>
                   ) : (
                     <div className="text-center space-y-1 z-10 px-4">
                       <QrCode className="w-8 h-8 text-emerald-500/60 mx-auto mb-2 animate-pulse" />
                       <p className="text-xs font-bold text-slate-400">对准商家的收款二维码</p>
-                      <p className="text-[9px] text-slate-600">或在下方直接选择附近模拟检测到的商户</p>
+                      <p className="text-xs tracking-wide text-slate-600">或在下方直接选择附近模拟检测到的商户</p>
                     </div>
                   )}
                 </div>
 
                 <div className="space-y-2 text-left">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">手动输入收款码文本</label>
+                  <label className="text-sm font-black text-slate-400 uppercase tracking-widest px-1">手动输入收款码文本</label>
                   <div className="flex space-x-2">
                     <input 
                       type="text" 
                       placeholder='例如: {"merchantAddress": "0x...", "merchantName": "王五", "merchantType": "FOOD"}'
                       value={scanInput}
                       onChange={(e) => setScanInput(e.target.value)}
-                      className="flex-1 bg-slate-950/40 border border-slate-850 rounded-xl px-3 py-2 text-xs outline-none focus:border-emerald-500/50 text-slate-200 transition-colors duration-300"
+                      className="flex-1 bg-slate-950/40 border border-slate-850 rounded-xl px-3 py-2 text-xs outline-none focus:border-emerald-500/50 text-white transition-colors duration-300"
                     />
                     <button 
                       type="button"
@@ -1298,7 +1298,7 @@ function App() {
                 </div>
 
                 <div className="space-y-2 text-left">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">检测到附近的特约商户 (模拟)</label>
+                  <label className="text-sm font-black text-slate-400 uppercase tracking-widest px-1">检测到附近的特约商户 (模拟)</label>
                   <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
                     <button
                       type="button"
@@ -1314,11 +1314,11 @@ function App() {
                           <ShoppingBag className="w-4 h-4" />
                         </div>
                         <div className="overflow-hidden">
-                          <p className="text-slate-200 font-bold text-xs truncate group-hover:text-white transition-colors">特约商户 (王五)</p>
-                          <p className="text-[9px] text-slate-500 font-mono">0x90F7...b906</p>
+                          <p className="text-white font-bold text-xs truncate group-hover:text-white transition-colors">特约商户 (王五)</p>
+                          <p className="text-xs tracking-wide text-slate-400 font-mono">0x90F7...b906</p>
                         </div>
                       </div>
-                      <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black px-2 py-0.5 rounded shrink-0">
+                      <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs tracking-wide font-black px-2 py-0.5 rounded shrink-0">
                         {localStorage.getItem("merchant_category_0x90F79bf6eb2c4f870365E785982E1f101E93b906") || "餐饮美食"}
                       </span>
                     </button>
@@ -1328,26 +1328,26 @@ function App() {
             ) : (
               <form onSubmit={handleScanPay} className="space-y-6 animate-in slide-in-from-right-4 duration-300">
                 <div className="bg-slate-950/60 border border-slate-850/80 rounded-2xl p-4 text-left">
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">收款商户</p>
-                  <h4 className="text-base font-extrabold text-slate-200 mt-0.5">{scannedMerchant.merchantName}</h4>
-                  <p className="text-[10px] text-slate-500 font-mono mt-0.5">{scannedMerchant.merchantAddress}</p>
+                  <p className="text-sm text-slate-400 font-bold uppercase tracking-wider">收款商户</p>
+                  <h4 className="text-base font-extrabold text-white mt-0.5">{scannedMerchant.merchantName}</h4>
+                  <p className="text-sm text-slate-400 font-mono mt-0.5">{scannedMerchant.merchantAddress}</p>
                   <div className="mt-3 flex items-center space-x-2">
-                    <span className="text-[10px] text-slate-500 font-bold">主营类目:</span>
-                    <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded">
+                    <span className="text-sm text-slate-400 font-bold">主营类目:</span>
+                    <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-bold px-2 py-0.5 rounded">
                       {scannedMerchant.merchantType}
                     </span>
                   </div>
                 </div>
 
                 <div className="space-y-2 text-left">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">付款金额 (元 / Wei 1:1)</label>
+                  <label className="text-sm font-black text-slate-400 uppercase tracking-widest px-1">付款金额 (元 / Wei 1:1)</label>
                   <input
                     type="number"
                     min="1"
                     placeholder="请输入付款金额"
                     value={scanAmount}
                     onChange={(e) => setScanAmount(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/50 rounded-xl py-3 px-4 text-white text-sm outline-none transition-all duration-300"
                     required
                     autoFocus
                   />
@@ -1357,7 +1357,7 @@ function App() {
                   <button
                     type="button"
                     onClick={() => setScannedMerchant(null)}
-                    className="flex-1 py-3 border border-slate-850 bg-slate-950 text-slate-400 hover:text-slate-200 hover:bg-slate-900/40 rounded-xl text-xs font-bold transition-all duration-300"
+                    className="flex-1 py-3 border border-slate-850 bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-900/70 rounded-xl text-xs font-bold transition-all duration-300"
                   >
                     重扫
                   </button>

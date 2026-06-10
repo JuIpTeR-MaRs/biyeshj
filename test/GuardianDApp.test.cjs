@@ -22,7 +22,7 @@ describe("GuardianDApp Contract", function () {
     it("Should fail if ward is same as guardian", async function () {
       await expect(
         dapp.connect(ward).requestGuardian(ward.address)
-      ).to.be.revertedWith("GuardianDApp: Cannot be your own guardian");
+      ).to.be.revertedWithCustomError(dapp, "CannotBeOwnGuardian");
     });
   });
 
@@ -46,6 +46,12 @@ describe("GuardianDApp Contract", function () {
       expect(tx.isPending).to.be.true;
       expect(tx.isApproved).to.be.false;
     });
+
+    it("Should fail if non-oracle calls recordPayment", async function () {
+      await expect(
+        dapp.connect(ward).recordPayment(ward.address, 500, "Coffee")
+      ).to.be.revertedWithCustomError(dapp, "CallerIsNotOracle");
+    });
   });
 
   describe("Approval", function () {
@@ -66,7 +72,41 @@ describe("GuardianDApp Contract", function () {
     it("Should fail if non-guardian tries to approve", async function () {
       await expect(
         dapp.connect(other).confirmTransaction(1, true)
-      ).to.be.revertedWith("GuardianDApp: Not the authorized guardian");
+      ).to.be.revertedWithCustomError(dapp, "NotAuthorizedGuardian");
+    });
+
+    it("Should fail if guardian tries to approve a non-pending or non-existent transaction", async function () {
+      await dapp.connect(guardian).confirmTransaction(1, true); // First confirm
+      // Try to confirm again
+      await expect(
+        dapp.connect(guardian).confirmTransaction(1, true)
+      ).to.be.revertedWithCustomError(dapp, "NotPendingTransaction");
+
+      await expect(
+        dapp.connect(guardian).confirmTransaction(999, true)
+      ).to.be.revertedWithCustomError(dapp, "TransactionNotFound");
+    });
+  });
+
+  describe("Threshold Management", function () {
+    beforeEach(async function () {
+      await dapp.connect(oracle).bindGuardian(ward.address, guardian.address);
+    });
+
+    it("Should allow ward to set their own threshold", async function () {
+      await dapp.connect(ward).setThreshold(2000);
+      expect(await dapp.threshold(ward.address)).to.equal(2000n);
+    });
+
+    it("Should allow guardian to set ward's threshold", async function () {
+      await dapp.connect(guardian).setGuardianThreshold(ward.address, 3000);
+      expect(await dapp.threshold(ward.address)).to.equal(3000n);
+    });
+
+    it("Should fail if non-guardian tries to set ward's threshold", async function () {
+      await expect(
+        dapp.connect(other).setGuardianThreshold(ward.address, 3000)
+      ).to.be.revertedWithCustomError(dapp, "NotAuthorizedGuardian");
     });
   });
 
@@ -89,7 +129,7 @@ describe("GuardianDApp Contract", function () {
     it("Should fail if normal ward sets blacklisted merchant", async function () {
       await expect(
         dapp.connect(ward).setBannedMerchant("Gambling", true)
-      ).to.be.revertedWith("GuardianDApp: Only owner or guardian can set banned merchants");
+      ).to.be.revertedWithCustomError(dapp, "OnlyOwnerOrGuardian");
     });
 
     it("Should intercept blacklisted merchant payment even if under threshold", async function () {

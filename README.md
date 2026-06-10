@@ -52,7 +52,7 @@ ALIPAY_PUBLIC_KEY=您的沙箱支付宝公钥
 ALIPAY_GATEWAY=https://openapi-sandbox.dl.alipaydev.com/gateway.do
 
 # 4. DeepSeek 大模型配置（用于三端 AI 智能诊断分析，无需暴露在前端）
-DEEPSEEK_API_KEY=sk-af43a7d96ebe46ddaf4b4b15a125b11d
+DEEPSEEK_API_KEY=您的DeepSeek_API_KEY
 ```
 
 > [!WARNING]

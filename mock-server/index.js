@@ -519,8 +519,33 @@ app.get("/api/alipay/return", async (req, res) => {
             console.log(`✅ [Alipay Return] Verified success for previously approved transaction ID: ${approvedTxIdRaw}. Bypassing duplicate on-chain record.`);
             result = { success: true };
         } else {
-            console.log(`✅ [Alipay Return] Verified! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
-            result = await paymentService.recordOnChain(wardAddress, Math.floor(parseFloat(amount)), category, merchantAddress);
+            if (processingTrades.has(outTradeNo)) {
+                console.log(`✅ [Alipay Return] Order ${outTradeNo} is already being recorded or has been recorded by query poller. Reusing it.`);
+                try {
+                    await processingTrades.get(outTradeNo);
+                    result = { success: true };
+                } catch (err) {
+                    result = { success: false, error: err.message };
+                }
+            } else {
+                console.log(`✅ [Alipay Return] Verified! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
+                const processPromise = (async () => {
+                    const recordResult = await paymentService.recordOnChain(wardAddress, Math.floor(parseFloat(amount)), category, merchantAddress);
+                    if (!recordResult.success) {
+                        throw new Error(recordResult.error);
+                    }
+                    return true;
+                })();
+                processingTrades.set(outTradeNo, processPromise);
+                
+                try {
+                    await processPromise;
+                    result = { success: true };
+                } catch (err) {
+                    processingTrades.delete(outTradeNo);
+                    result = { success: false, error: err.message };
+                }
+            }
         }
         
         if (result.success) {

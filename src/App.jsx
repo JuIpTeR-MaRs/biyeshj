@@ -15,6 +15,9 @@ import { MessageCenter } from './components/MessageCenter';
 import { getContract, CONTRACT_ADDRESS, fundAccount } from './utils/contract';
 import { getLocalBankUser } from './utils/bankAccount';
 
+// Global tracking to prevent duplicate notifications for the same order across component lifecycles or polling/postMessage races
+const notifiedTrades = new Set();
+
 function App() {
   const [account, setAccount] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -95,6 +98,10 @@ function App() {
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [qrOutTradeNo, setQrOutTradeNo] = useState('');
+  const qrOutTradeNoRef = useRef(qrOutTradeNo);
+  useEffect(() => {
+    qrOutTradeNoRef.current = qrOutTradeNo;
+  }, [qrOutTradeNo]);
   const [qrCountdown, setQrCountdown] = useState(60);
   const pollIntervalRef = useRef(null);
   const countdownIntervalRef = useRef(null);
@@ -553,7 +560,7 @@ function App() {
               countdownIntervalRef.current = null;
             }
             setShowQrModal(false);
-            handlePaymentSuccessRef.current();
+            handlePaymentSuccessRef.current(outTradeNo);
           } else if (data.status === 'FAILED') {
             clearInterval(pollIntervalRef.current);
             pollIntervalRef.current = null;
@@ -623,8 +630,26 @@ function App() {
   // 正在支付的已审批交易ID
   const [payingTxId, setPayingTxId] = useState(null);
   const payingTxIdRef = useRef(null);
+  const lastNotifiedRef = useRef(null);
+  const lastToastTimeRef = useRef(0);
 
-  const handlePaymentSuccess = useCallback(() => {
+  const handlePaymentSuccess = useCallback((optOutTradeNo) => {
+    const tradeNo = optOutTradeNo || qrOutTradeNoRef.current;
+    const now = Date.now();
+
+    if (tradeNo) {
+      if (notifiedTrades.has(tradeNo) || lastNotifiedRef.current === tradeNo) {
+        return;
+      }
+      notifiedTrades.add(tradeNo);
+      lastNotifiedRef.current = tradeNo;
+    }
+
+    if (now - lastToastTimeRef.current < 4000) {
+      return;
+    }
+    lastToastTimeRef.current = now;
+
     toast.success("🏆 支付宝支付成功，已安全记录并同步上链！");
     const currentTxId = payingTxIdRef.current;
     if (currentTxId) {

@@ -28,36 +28,27 @@ export const LoginPage = ({ onLogin }) => {
   const handlePhoneLogin = (e) => {
     e.preventDefault();
     if (!phone || !password) {
-      toast.error("请输入手机号和密码");
+      toast.error("请输入账号和密码");
       return;
     }
 
     setIsLoading(true);
     setTimeout(() => {
-      const user = verifyLogin(phone, password);
-      if (user) {
-        registerToLocalBank(user);
-        toast.success("安全认证成功");
-        onLogin(user);
+      if (phone === 'admin' && password === 'admin123') {
+        toast.success("管理员认证成功");
+        onLogin({ role: 'admin', accountName: '超级管理员', address: 'admin' });
       } else {
-        toast.error("验证失败：手机号或密码错误");
+        const user = verifyLogin(phone, password);
+        if (user) {
+          registerToLocalBank(user);
+          toast.success("安全认证成功");
+          onLogin(user);
+        } else {
+          toast.error("验证失败：手机号或密码错误");
+        }
       }
       setIsLoading(false);
     }, 1000);
-  };
-
-  const handleAdminLogin = (e) => {
-    e.preventDefault();
-    if (phone === 'admin' && password === 'admin123') {
-      setIsLoading(true);
-      setTimeout(() => {
-        toast.success("管理员认证成功");
-        onLogin({ role: 'admin', accountName: '超级管理员', address: 'admin' });
-        setIsLoading(false);
-      }, 800);
-    } else {
-      toast.error("验证失败：管理员账号或密码错误");
-    }
   };
 
   const handleRegister = async (e) => {
@@ -134,7 +125,7 @@ export const LoginPage = ({ onLogin }) => {
 
           {/* Mode Tabs */}
           <div className="flex bg-slate-950/60 border border-slate-800/50 p-1 rounded-2xl mb-8">
-            {['phone', 'register', 'quick', 'admin'].map((m) => (
+            {['phone', 'register', 'quick'].map((m) => (
               <button 
                 key={m}
                 onClick={() => setLoginMode(m)}
@@ -144,7 +135,7 @@ export const LoginPage = ({ onLogin }) => {
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {m === 'phone' ? '登录' : m === 'register' ? '注册' : m === 'quick' ? '快速切换' : '管理后台'}
+                {m === 'phone' ? '登录' : m === 'register' ? '注册' : '快速切换'}
               </button>
             ))}
           </div>
@@ -153,11 +144,11 @@ export const LoginPage = ({ onLogin }) => {
             {loginMode === 'phone' && (
               <form onSubmit={handlePhoneLogin} className="space-y-4 animate-in slide-in-from-left-4 duration-300">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">手机号</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">账号 / 手机号</label>
                   <div className="relative group">
                     <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors duration-300" />
                     <input 
-                      type="text" placeholder="手机号" value={phone}
+                      type="text" placeholder="账号 / 手机号" value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 rounded-2xl py-3.5 pl-11 pr-4 text-slate-200 text-sm outline-none transition-all duration-300"
                     />
@@ -296,42 +287,7 @@ export const LoginPage = ({ onLogin }) => {
               </div>
             )}
 
-            {loginMode === 'admin' && (
-              <form onSubmit={handleAdminLogin} className="space-y-4 animate-in slide-in-from-right-4 duration-300">
-                <div className="text-center mb-6">
-                  <Shield className="w-12 h-12 text-purple-400 mx-auto mb-2 opacity-50 animate-pulse" />
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">系统管理中心入口</p>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">管理员账号</label>
-                  <div className="relative group">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-purple-400 transition-colors duration-300" />
-                    <input 
-                      type="text" placeholder="请输入管理员账号" value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-purple-500/50 rounded-2xl py-3.5 pl-11 pr-4 text-slate-200 text-sm outline-none transition-all duration-300"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">管理员密码</label>
-                  <div className="relative group">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-purple-400 transition-colors duration-300" />
-                    <input 
-                      type={showPassword ? "text" : "password"} placeholder="请输入管理员密码" value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-purple-500/50 rounded-2xl py-3.5 pl-11 pr-11 text-slate-200 text-sm outline-none transition-all duration-300"
-                    />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-                <button disabled={isLoading} className="w-full bg-gradient-to-r from-indigo-700 via-purple-700 to-indigo-700 hover:from-indigo-600 hover:via-purple-600 hover:to-indigo-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-purple-600/10 hover:shadow-purple-600/20 transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center space-x-2 mt-6">
-                  {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <><span>进入后台</span><Shield className="w-4 h-4" /></>}
-                </button>
-              </form>
-            )}
+
           </div>
         </div>
       </div>

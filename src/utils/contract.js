@@ -9,19 +9,24 @@ export const CONTRACT_ABI = [
   "function getWardGuardians(address) view returns (address[] memory)",
   "function isWardGuardian(address,address) view returns (bool)",
   "function threshold(address) view returns (uint256)",
-  "function transactions(uint256) view returns (uint256 id, address ward, uint256 amount, uint256 timestamp, string merchantType, bool isPending, bool isApproved)",
+  "function transactions(uint256) view returns (uint256 id, address ward, uint256 amount, uint256 timestamp, string merchantType, bool isPending, bool isApproved, bool isPaid)",
   "function txCounter() view returns (uint256)",
   "function confirmTransaction(uint256 _txId, bool _approve) external",
+  "function markPaymentSuccess(uint256 _txId) external",
   "function requestGuardian(address _guardian) external",
   "function acceptGuardianship(address _ward) external",
   "function rejectGuardianship(address _ward) external",
   "function setGuardianThreshold(address _ward, uint256 _amount) external",
   "function setThreshold(uint256 _amount) external",
   "function getPendingTransactions(address _guardian) view returns (uint256[] memory)",
+  "function isFrozen(address) view returns (bool)",
+  "function setFreezeAccount(address _account, bool _freeze) external",
   "event PaymentPendingApproval(uint256 indexed txId, address indexed ward, uint256 amount)",
   "event ThresholdSet(address indexed ward, uint256 amount)",
   "event TransactionConfirmed(uint256 indexed txId, address indexed guardian)",
-  "event TransactionRejected(uint256 indexed txId, address indexed guardian)"
+  "event TransactionRejected(uint256 indexed txId, address indexed guardian)",
+  "event PaymentAutoApproved(uint256 indexed txId, address indexed ward, uint256 amount)",
+  "event AccountFrozen(address indexed account, bool frozen, address indexed operator)"
 ];
 
 /**

@@ -10,10 +10,16 @@ const CONTRACT_ABI = [
     "function bannedMerchants(string) view returns (bool)",
     "function threshold(address) view returns (uint256)",
     "function wardToGuardian(address) view returns (address)",
-    "function transactions(uint256) view returns (uint256 id, address ward, uint256 amount, uint256 timestamp, string merchantType, bool isPending, bool isApproved)",
+    "function transactions(uint256) view returns (uint256 id, address ward, uint256 amount, uint256 timestamp, string merchantType, bool isPending, bool isApproved, bool isPaid)",
     "function storeAiReportHash(address _ward, string _month, bytes32 _reportHash) external",
+    "function markPaymentSuccess(uint256 _txId) external",
+    "function isFrozen(address) view returns (bool)",
+    "function setFreezeAccount(address _account, bool _freeze) external",
     "event TransactionConfirmed(uint256 indexed txId, address indexed guardian)",
-    "event TransactionRejected(uint256 indexed txId, address indexed guardian)"
+    "event TransactionRejected(uint256 indexed txId, address indexed guardian)",
+    "event PaymentAutoApproved(uint256 indexed txId, address indexed ward, uint256 amount)",
+    "event PaymentPendingApproval(uint256 indexed txId, address indexed ward, uint256 amount)",
+    "event AccountFrozen(address indexed account, bool frozen, address indexed operator)"
 ];
 
 class PaymentMockService {
@@ -103,6 +109,15 @@ class PaymentMockService {
                     );
                     console.log("✅ Added 'is_pending' and 'is_approved' columns to 'transactions' table.");
                 }
+                const [columns2] = await this.dbPool.execute(
+                    "SHOW COLUMNS FROM transactions LIKE 'is_paid'"
+                );
+                if (Array.isArray(columns2) && columns2.length === 0) {
+                    await this.dbPool.execute(
+                        "ALTER TABLE transactions ADD COLUMN is_paid BOOLEAN DEFAULT FALSE COMMENT '是否已支付'"
+                    );
+                    console.log("✅ Added 'is_paid' column to 'transactions' table.");
+                }
             } catch (columnError) {
                 console.log("ℹ️ transactions status columns check skipped.");
             }
@@ -131,6 +146,18 @@ class PaymentMockService {
                     console.error("Failed to update rejected status:", e);
                 }
             });
+            
+            this.contract.on("PaymentAutoApproved", async (txId, ward, amount) => {
+                try {
+                    await this.dbPool.execute(
+                        "UPDATE transactions SET is_pending = 0, is_approved = 1, is_paid = 1 WHERE id = ?",
+                        [txId]
+                    );
+                    console.log(`[MySQL] Tx ${txId} marked as auto approved and paid.`);
+                } catch (e) {
+                    console.error("Failed to update auto approved status:", e);
+                }
+            });
 
         } catch (dbError) {
             console.error("❌ [MySQL] Failed to initialize ai_reports table:", dbError.message);
@@ -139,6 +166,10 @@ class PaymentMockService {
 
     async recordOnChain(wardAddress, amount, merchantType, merchantAddress = null) {
         try {
+            const isFrozen = await this.contract.isFrozen(wardAddress);
+            if (isFrozen) {
+                return { success: false, error: "账户已被冻结，无法进行消费！" };
+            }
             console.log(`[Oracle] Recording: ${wardAddress} - ${amount} Wei`);
             const tx = await this.contract.recordPayment(
                 wardAddress, 
@@ -152,7 +183,7 @@ class PaymentMockService {
             // 记录到本地 MySQL 数据库 (双重记账)
             try {
                 const [result] = await this.dbPool.execute(
-                    `INSERT INTO transactions (ward_address, amount, merchant_type, tx_hash, merchant_address, is_pending, is_approved) VALUES (?, ?, ?, ?, ?, 1, 0)`,
+                    `INSERT INTO transactions (ward_address, amount, merchant_type, tx_hash, merchant_address, is_pending, is_approved, is_paid) VALUES (?, ?, ?, ?, ?, 1, 0, 0)`,
                     [wardAddress, amount, merchantType, txHash, merchantAddress]
                 );
                 console.log(`[MySQL] 成功写入本地数据库, ID: ${result.insertId}`);
@@ -193,6 +224,23 @@ class PaymentMockService {
         } catch (dbError) {
             console.error(`[MySQL] 写入消费阈值失败:`, dbError.message);
             return { success: false, error: dbError.message };
+        }
+    }
+
+    async markPaymentSuccess(txId) {
+        try {
+            const tx = await this.contract.markPaymentSuccess(txId, { gasPrice: 0 });
+            await tx.wait();
+            
+            await this.dbPool.execute(
+                "UPDATE transactions SET is_paid = 1 WHERE id = ?",
+                [txId]
+            );
+            console.log(`[Oracle] Tx ${txId} successfully marked as paid on chain and MySQL.`);
+            return { success: true };
+        } catch (e) {
+            console.error(`[Oracle] Failed to mark payment success for Tx ${txId}:`, e.message);
+            return { success: false, error: e.message };
         }
     }
 

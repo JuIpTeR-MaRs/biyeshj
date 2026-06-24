@@ -80,25 +80,41 @@ async function main() {
       const [txRows] = await db.execute("SELECT * FROM transactions ORDER BY id ASC");
       if (txRows.length > 0) {
         console.log(`🔄 Recovering ${txRows.length} transactions from database...`);
+        let contractTxId = 0;
         for (const row of txRows) {
           const tx = await dapp.recordPayment(row.ward_address, Math.floor(row.amount), row.merchant_type);
           const receipt = await tx.wait();
-          console.log(`   ✅ Restored transaction: ${row.ward_address} -> ${row.amount} Wei (New Tx Hash: ${receipt.hash})`);
+          contractTxId++;
+          console.log(`   ✅ Restored transaction: ${row.ward_address} -> ${row.amount} Wei (New Tx Hash: ${receipt.hash}, Contract Tx ID: ${contractTxId})`);
           
           // Restore approval status if column exists
           if (row.is_approved !== undefined && row.is_pending !== undefined) {
-              if (row.is_approved == 1) {
-                  await (await dapp.adminConfirmTransaction(row.id, true)).wait();
+              if (row.is_approved == 1 && row.is_pending == 0) {
+                  await (await dapp.adminConfirmTransaction(contractTxId, true)).wait();
                   console.log(`      ↳ Restored status: Approved`);
               } else if (row.is_pending == 0 && row.is_approved == 0) {
-                  await (await dapp.adminConfirmTransaction(row.id, false)).wait();
+                  await (await dapp.adminConfirmTransaction(contractTxId, false)).wait();
                   console.log(`      ↳ Restored status: Rejected`);
               }
           }
 
-          // Update the transaction hash in MySQL so they match
-          await db.execute("UPDATE transactions SET tx_hash = ? WHERE id = ?", [receipt.hash, row.id]);
+          // Restore paid status if column exists and row is paid
+          if (row.is_paid == 1) {
+              try {
+                  await (await dapp.markPaymentSuccess(contractTxId)).wait();
+                  console.log(`      ↳ Restored status: Paid`);
+              } catch (paidErr) {
+                  console.warn(`      ↳ ⚠️ Could not mark restored transaction ${contractTxId} as paid on chain:`, paidErr.message);
+              }
+          }
+
+          // Update the transaction ID and hash in MySQL so they match the blockchain sequence
+          await db.execute("UPDATE transactions SET id = ?, tx_hash = ? WHERE id = ?", [contractTxId, receipt.hash, row.id]);
         }
+        
+        // Reset MySQL AUTO_INCREMENT to prevent gaps/key collisions on subsequent transactions
+        await db.execute("ALTER TABLE transactions AUTO_INCREMENT = 1");
+        console.log("   ✅ MySQL transactions table IDs and AUTO_INCREMENT aligned with contract txCounter.");
       }
       
       await db.end();

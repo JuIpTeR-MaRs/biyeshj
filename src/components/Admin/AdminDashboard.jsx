@@ -1,20 +1,65 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Users, Activity, Link as LinkIcon, Sliders, Database, ArrowRight } from 'lucide-react';
+import { Shield, Users, Activity, Link as LinkIcon, Sliders, Database, ArrowRight, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { AiAnalysisCard } from '../AiAnalysis/AiAnalysisCard';
 import { Navbar } from '../layout/Navbar';
+import { getContract } from '../../utils/contract';
 
 export const AdminDashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('users');
   const [users, setUsers] = useState([]);
   const [dbData, setDbData] = useState({ transactions: [], bindings: [], thresholds: [] });
   const [loading, setLoading] = useState(true);
+  const [freezingUser, setFreezingUser] = useState(null);
+
+  const [txFilter, setTxFilter] = useState('');
+  const [txPage, setTxPage] = useState(1);
+  const txsPerPage = 10;
+
+  useEffect(() => {
+    setTxPage(1);
+  }, [txFilter]);
+
+  const filteredTxs = dbData.transactions
+    .filter(t => {
+      const term = txFilter.toLowerCase().trim();
+      if (!term) return true;
+      return (
+        t.id.toString().includes(term) ||
+        (t.ward_address && t.ward_address.toLowerCase().includes(term)) ||
+        (t.merchant_type && t.merchant_type.toLowerCase().includes(term)) ||
+        (t.amount && t.amount.toString().includes(term))
+      );
+    })
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  const totalPages = Math.ceil(filteredTxs.length / txsPerPage);
+  const displayedTxs = filteredTxs.slice((txPage - 1) * txsPerPage, txPage * txsPerPage);
 
   useEffect(() => {
     // Fetch local users (excluding passwords)
     const localAccounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
     const safeUsers = localAccounts.map(({ password, ...rest }) => rest);
     setUsers(safeUsers);
+
+    const fetchUsersFrozenStatus = async () => {
+      try {
+        const contract = await getContract();
+        const usersWithFrozen = await Promise.all(safeUsers.map(async u => {
+          let frozen = false;
+          try {
+            frozen = await contract.isFrozen(u.address);
+          } catch (e) {
+            console.error("Error reading frozen state for", u.address, e);
+          }
+          return { ...u, isFrozen: frozen };
+        }));
+        setUsers(usersWithFrozen);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchUsersFrozenStatus();
 
     // Fetch DB data
     const fetchDbData = async () => {
@@ -39,6 +84,25 @@ export const AdminDashboard = ({ onLogout }) => {
     };
     fetchDbData();
   }, []);
+
+  const handleToggleFreeze = async (userAddress, currentFrozen) => {
+    setFreezingUser(userAddress);
+    try {
+      const contract = await getContract();
+      const tx = await contract.setFreezeAccount(userAddress, !currentFrozen);
+      toast.info(`正在提交${!currentFrozen ? '冻结' : '解冻'}该账户的交易...`);
+      await tx.wait();
+      toast.success(`${!currentFrozen ? '已成功冻结' : '已成功解冻'}该账户`);
+      
+      // Update local state
+      setUsers(prev => prev.map(u => u.address === userAddress ? { ...u, isFrozen: !currentFrozen } : u));
+    } catch (err) {
+      console.error(err);
+      toast.error(err.reason || `${!currentFrozen ? '冻结' : '解冻'}账户失败`);
+    } finally {
+      setFreezingUser(null);
+    }
+  };
 
   const tabs = [
     { id: 'users', label: '注册用户 (安全视图)', icon: Users },
@@ -116,29 +180,57 @@ export const AdminDashboard = ({ onLogout }) => {
                     <table className="w-full text-left text-sm text-slate-300">
                       <thead className="bg-slate-950/80 border-b border-slate-800/60 text-xs uppercase font-black text-slate-400">
                         <tr>
-                          <th className="px-6 py-4">姓名</th>
-                          <th className="px-6 py-4">手机号</th>
-                          <th className="px-6 py-4">角色</th>
-                          <th className="px-6 py-4">钱包地址</th>
+                          <th className="px-6 py-4 whitespace-nowrap">姓名</th>
+                          <th className="px-6 py-4 whitespace-nowrap">手机号</th>
+                          <th className="px-6 py-4 whitespace-nowrap">角色</th>
+                          <th className="px-6 py-4 whitespace-nowrap">钱包地址</th>
+                          <th className="px-6 py-4 whitespace-nowrap">账户状态</th>
+                          <th className="px-6 py-4 whitespace-nowrap">操作</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40 bg-slate-900/10">
                         {users.map((u, idx) => (
                           <tr key={idx} className="hover:bg-slate-900/30 transition-colors duration-200">
-                            <td className="px-6 py-4 font-bold text-white">{u.accountName}</td>
-                            <td className="px-6 py-4 font-mono">{u.phone}</td>
-                            <td className="px-6 py-4">
-                              <span className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border ${
+                            <td className="px-6 py-4 font-bold text-white whitespace-nowrap">{u.accountName}</td>
+                            <td className="px-6 py-4 font-mono whitespace-nowrap">{u.phone}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`inline-block whitespace-nowrap px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border ${
                                 u.role === 'guardian' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
                               }`}>
                                 {u.role === 'guardian' ? '监护人' : '被监护人'}
                               </span>
                             </td>
-                            <td className="px-6 py-4 font-mono text-xs text-slate-500">{u.address}</td>
+                            <td className="px-6 py-4 font-mono text-xs text-slate-500 whitespace-nowrap">{u.address}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                u.isFrozen 
+                                  ? 'bg-red-500/10 border-red-500/20 text-red-400 shadow-sm shadow-red-500/5' 
+                                  : 'bg-green-500/10 border-green-500/20 text-green-400 shadow-sm shadow-green-500/5'
+                              }`}>
+                                {u.isFrozen ? '已冻结' : '正常'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <button
+                                disabled={freezingUser === u.address}
+                                onClick={() => handleToggleFreeze(u.address, u.isFrozen)}
+                                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all border ${
+                                  u.isFrozen
+                                    ? 'bg-green-500/10 border-green-500/20 text-green-400 hover:bg-green-500/20 hover:scale-[1.02] active:scale-[0.98]'
+                                    : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20 hover:scale-[1.02] active:scale-[0.98]'
+                                }`}
+                              >
+                                {freezingUser === u.address ? (
+                                  <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                                ) : (
+                                  u.isFrozen ? '解冻' : '冻结'
+                                )}
+                              </button>
+                            </td>
                           </tr>
                         ))}
                         {users.length === 0 && (
-                          <tr><td colSpan="4" className="text-center py-8 text-slate-500">暂无用户数据</td></tr>
+                          <tr><td colSpan="6" className="text-center py-8 text-slate-500">暂无用户数据</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -149,7 +241,19 @@ export const AdminDashboard = ({ onLogout }) => {
               {/* Transactions Tab */}
               {activeTab === 'transactions' && (
                 <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-                  <h2 className="text-xl font-bold text-white mb-6">全网交易流水</h2>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-2">
+                    <h2 className="text-xl font-bold text-white">全网交易流水</h2>
+                    <div className="relative w-full sm:w-72">
+                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                      <input
+                        type="text"
+                        placeholder="搜索ID、地址、类别、金额..."
+                        value={txFilter}
+                        onChange={(e) => setTxFilter(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 bg-slate-950/60 border border-slate-800/80 rounded-xl text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/50 transition-colors"
+                      />
+                    </div>
+                  </div>
                   
                   <AiAnalysisCard txs={dbData.transactions} role="admin" />
 
@@ -157,35 +261,87 @@ export const AdminDashboard = ({ onLogout }) => {
                     <table className="w-full text-left text-sm text-slate-300">
                       <thead className="bg-slate-950/80 border-b border-slate-800/60 text-xs uppercase font-black text-slate-400">
                         <tr>
-                          <th className="px-6 py-4">ID</th>
-                          <th className="px-6 py-4">被监护人地址</th>
-                          <th className="px-6 py-4">金额</th>
-                          <th className="px-6 py-4">类别</th>
-                          <th className="px-6 py-4">时间</th>
+                          <th className="px-6 py-4 whitespace-nowrap">ID</th>
+                          <th className="px-6 py-4 whitespace-nowrap">被监护人地址</th>
+                          <th className="px-6 py-4 whitespace-nowrap">金额</th>
+                          <th className="px-6 py-4 whitespace-nowrap">类别</th>
+                          <th className="px-6 py-4 whitespace-nowrap">时间</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40 bg-slate-900/10">
-                        {dbData.transactions.map((t, idx) => (
+                        {displayedTxs.map((t, idx) => (
                           <tr key={idx} className="hover:bg-slate-900/30 transition-colors duration-200">
-                            <td className="px-6 py-4 font-mono text-xs text-slate-500">#{t.id}</td>
-                            <td className="px-6 py-4 font-mono text-xs">{t.ward_address}</td>
-                            <td className="px-6 py-4 font-bold text-amber-400">{t.amount} 元</td>
-                            <td className="px-6 py-4">
-                              <span className="px-2.5 py-1 bg-slate-800/50 border border-slate-700 rounded text-[10px] text-slate-300">
+                            <td className="px-6 py-4 font-mono text-xs text-slate-500 whitespace-nowrap">#{t.id}</td>
+                            <td className="px-6 py-4 font-mono text-xs whitespace-nowrap">{t.ward_address}</td>
+                            <td className="px-6 py-4 font-bold text-amber-400 whitespace-nowrap">{t.amount} 元</td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className="inline-block whitespace-nowrap px-2.5 py-1 bg-slate-800/50 border border-slate-700 rounded text-[10px] text-slate-300">
                                 {t.merchant_type}
                               </span>
                             </td>
-                            <td className="px-6 py-4 text-xs text-slate-400">
+                            <td className="px-6 py-4 text-xs text-slate-400 whitespace-nowrap">
                               {new Date(t.created_at).toLocaleString()}
                             </td>
                           </tr>
                         ))}
-                        {dbData.transactions.length === 0 && (
+                        {filteredTxs.length === 0 && (
                           <tr><td colSpan="5" className="text-center py-8 text-slate-500">暂无交易记录</td></tr>
                         )}
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Pagination Controls */}
+                  {totalPages > 1 && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 px-2">
+                      <div className="text-xs text-slate-400">
+                        显示第 <span className="text-slate-200 font-bold">{(txPage - 1) * txsPerPage + 1}</span> 至 <span className="text-slate-200 font-bold">{Math.min(txPage * txsPerPage, filteredTxs.length)}</span> 条记录，共 <span className="text-slate-200 font-bold">{filteredTxs.length}</span> 条
+                      </div>
+                      <div className="flex items-center space-x-1.5">
+                        <button
+                          disabled={txPage === 1}
+                          onClick={() => setTxPage(prev => Math.max(prev - 1, 1))}
+                          className="p-1.5 rounded-lg border border-slate-800/80 bg-slate-900/40 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400 transition-colors"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        
+                        {/* Page Numbers with sliding window */}
+                        {(() => {
+                          const pages = [];
+                          const startPage = Math.max(1, txPage - 2);
+                          const endPage = Math.min(totalPages, startPage + 4);
+                          const adjustedStartPage = Math.max(1, endPage - 4);
+                          
+                          for (let p = adjustedStartPage; p <= endPage; p++) {
+                            const isCurrent = p === txPage;
+                            pages.push(
+                              <button
+                                key={p}
+                                onClick={() => setTxPage(p)}
+                                className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all ${
+                                  isCurrent
+                                    ? 'bg-purple-500/10 border-purple-500/30 text-purple-400 shadow-md shadow-purple-500/5'
+                                    : 'border-slate-800/80 bg-slate-900/40 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            );
+                          }
+                          return pages;
+                        })()}
+
+                        <button
+                          disabled={txPage === totalPages}
+                          onClick={() => setTxPage(prev => Math.min(prev + 1, totalPages))}
+                          className="p-1.5 rounded-lg border border-slate-800/80 bg-slate-900/40 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400 transition-colors"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -197,19 +353,19 @@ export const AdminDashboard = ({ onLogout }) => {
                     <table className="w-full text-left text-sm text-slate-300">
                       <thead className="bg-slate-950/80 border-b border-slate-800/60 text-xs uppercase font-black text-slate-400">
                         <tr>
-                          <th className="px-6 py-4">ID</th>
-                          <th className="px-6 py-4">被监护人地址</th>
-                          <th className="px-6 py-4">监护人地址</th>
-                          <th className="px-6 py-4">绑定时间</th>
+                          <th className="px-6 py-4 whitespace-nowrap">ID</th>
+                          <th className="px-6 py-4 whitespace-nowrap">被监护人地址</th>
+                          <th className="px-6 py-4 whitespace-nowrap">监护人地址</th>
+                          <th className="px-6 py-4 whitespace-nowrap">绑定时间</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40 bg-slate-900/10">
                         {dbData.bindings.map((b, idx) => (
                           <tr key={idx} className="hover:bg-slate-900/30 transition-colors duration-200">
-                            <td className="px-6 py-4 font-mono text-xs text-slate-500">#{b.id}</td>
-                            <td className="px-6 py-4 font-mono text-xs text-emerald-400">{b.ward_address}</td>
-                            <td className="px-6 py-4 font-mono text-xs text-blue-400">{b.guardian_address}</td>
-                            <td className="px-6 py-4 text-xs text-slate-400">
+                            <td className="px-6 py-4 font-mono text-xs text-slate-500 whitespace-nowrap">#{b.id}</td>
+                            <td className="px-6 py-4 font-mono text-xs text-emerald-400 whitespace-nowrap">{b.ward_address}</td>
+                            <td className="px-6 py-4 font-mono text-xs text-blue-400 whitespace-nowrap">{b.guardian_address}</td>
+                            <td className="px-6 py-4 text-xs text-slate-400 whitespace-nowrap">
                               {new Date(b.created_at).toLocaleString()}
                             </td>
                           </tr>
@@ -231,17 +387,17 @@ export const AdminDashboard = ({ onLogout }) => {
                     <table className="w-full text-left text-sm text-slate-300">
                       <thead className="bg-slate-950/80 border-b border-slate-800/60 text-xs uppercase font-black text-slate-400">
                         <tr>
-                          <th className="px-6 py-4">被监护人地址</th>
-                          <th className="px-6 py-4">当前阈值 (元)</th>
-                          <th className="px-6 py-4">最后更新时间</th>
+                          <th className="px-6 py-4 whitespace-nowrap">被监护人地址</th>
+                          <th className="px-6 py-4 whitespace-nowrap">当前阈值 (元)</th>
+                          <th className="px-6 py-4 whitespace-nowrap">最后更新时间</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40 bg-slate-900/10">
                         {dbData.thresholds.map((t, idx) => (
                           <tr key={idx} className="hover:bg-slate-900/30 transition-colors duration-200">
-                            <td className="px-6 py-4 font-mono text-xs text-emerald-400">{t.ward_address}</td>
-                            <td className="px-6 py-4 font-bold text-purple-400">{t.threshold_amount}</td>
-                            <td className="px-6 py-4 text-xs text-slate-400">
+                            <td className="px-6 py-4 font-mono text-xs text-emerald-400 whitespace-nowrap">{t.ward_address}</td>
+                            <td className="px-6 py-4 font-bold text-purple-400 whitespace-nowrap">{t.threshold_amount}</td>
+                            <td className="px-6 py-4 text-xs text-slate-400 whitespace-nowrap">
                               {new Date(t.updated_at).toLocaleString()}
                             </td>
                           </tr>

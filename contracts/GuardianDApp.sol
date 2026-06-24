@@ -34,6 +34,8 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     error TransactionNotFound();
     /// @dev 交易不处于待处理（Pending）状态时抛出
     error NotPendingTransaction();
+    /// @dev 账户已被冻结时抛出
+    error AccountIsFrozen();
 
     // --- 状态变量 ---
 
@@ -63,6 +65,7 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         string merchantType;
         bool isPending;
         bool isApproved;
+        bool isPaid;
     }
 
     /// @notice 被监护人地址 => 监护人地址列表
@@ -97,6 +100,9 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     /// @dev 用于在链上固定 AI 每月生成报告的摘要，防止篡改
     mapping(address => mapping(string => bytes32)) public aiReportHashes;
 
+    /// @notice 账户地址 => 是否被冻结
+    mapping(address => bool) public isFrozen;
+
     // --- 事件 ---
 
     /// @notice 消费低于阈值或无监护人自动批准时触发
@@ -121,6 +127,8 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     event BannedMerchantSet(string merchantType, bool banned);
     /// @notice AI 审计报告哈希存证成功时触发
     event AiReportHashStored(address indexed ward, string month, bytes32 reportHash);
+    /// @notice 账户被冻结/解冻时触发
+    event AccountFrozen(address indexed account, bool frozen, address indexed operator);
 
     // --- 修饰符 ---
 
@@ -250,6 +258,23 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice 冻结/解冻某个账户
+     * @param _account 被操作账户地址
+     * @param _freeze 是否冻结
+     */
+    function setFreezeAccount(address _account, bool _freeze) external {
+        if (msg.sender == owner()) {
+            isFrozen[_account] = _freeze;
+            emit AccountFrozen(_account, _freeze, msg.sender);
+        } else if (isWardGuardian[_account][msg.sender]) {
+            isFrozen[_account] = _freeze;
+            emit AccountFrozen(_account, _freeze, msg.sender);
+        } else {
+            revert NotAuthorizedGuardian();
+        }
+    }
+
+    /**
      * @notice 记录支付记录（仅预言机调用）
      * @dev 若金额 <= 阈值直接标记完成，否则标记为 pending 并触发预警
      * @param _ward 被监护人地址
@@ -262,6 +287,7 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         string calldata _merchantType
     ) external onlyOracle nonReentrant {
         if (_ward == address(0)) revert AddressRequired();
+        if (isFrozen[_ward]) revert AccountIsFrozen();
         
         txCounter++;
         uint256 currentThreshold = threshold[_ward];
@@ -277,7 +303,8 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
             timestamp: block.timestamp,
             merchantType: _merchantType,
             isPending: isPending,
-            isApproved: !isPending
+            isApproved: !isPending,
+            isPaid: !isPending
         });
 
         if (isPending) {
@@ -373,6 +400,17 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
             }
         }
         return pendingIds;
+    }
+
+    /**
+     * @notice 预言机标记历史审批订单已支付成功
+     * @param _txId 交易 ID
+     */
+    function markPaymentSuccess(uint256 _txId) external onlyOracle nonReentrant {
+        Transaction storage txn = transactions[_txId];
+        if (txn.id == 0) revert TransactionNotFound();
+        if (!txn.isApproved) revert NotPendingTransaction(); // 复用异常或新增
+        txn.isPaid = true;
     }
 
     /**

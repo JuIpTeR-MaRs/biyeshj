@@ -25,6 +25,8 @@ function App() {
   const [pendingTxs, setPendingTxs] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [isAccountFrozen, setIsAccountFrozen] = useState(false);
+  const [freezingWard, setFreezingWard] = useState(null);
 
   // 消息中心状态
   const [messages, setMessages] = useState(() => {
@@ -165,16 +167,19 @@ function App() {
           const isG = await contract.isWardGuardian(accInfo.address, account);
           if (isG) {
             const thres = await contract.threshold(accInfo.address);
-            wardsList.push({...accInfo, threshold: thres.toString()});
+            const frozen = await contract.isFrozen(accInfo.address);
+            wardsList.push({...accInfo, threshold: thres.toString(), isFrozen: frozen});
           }
         } catch (e) {}
       }
       setActiveWards(wardsList);
 
-      // 获取当前用户的阈值
+      // 获取当前用户的阈值和冻结状态
       try {
         const myThres = await contract.threshold(account);
         setMyThreshold(myThres.toString());
+        const frozen = await contract.isFrozen(account);
+        setIsAccountFrozen(frozen);
       } catch (e) {}
 
 
@@ -447,6 +452,24 @@ function App() {
       toast.error(err.reason || "修改阈值失败");
     } finally {
       setIsUpdatingThreshold(false);
+    }
+  };
+
+  // 监护人冻结/解冻被监护人账户
+  const handleToggleFreeze = async (wardAddress, currentFrozen) => {
+    setFreezingWard(wardAddress);
+    try {
+      const contract = await getContract();
+      const tx = await contract.setFreezeAccount(wardAddress, !currentFrozen);
+      toast.info(`正在提交${!currentFrozen ? '冻结' : '解冻'}账户请求...`);
+      await tx.wait();
+      toast.success(`${!currentFrozen ? '已成功冻结' : '已成功解冻'}被监护人账户`);
+      fetchData();
+    } catch (err) {
+      console.error(err);
+      toast.error(err.reason || `${!currentFrozen ? '冻结' : '解冻'}失败`);
+    } finally {
+      setFreezingWard(null);
     }
   };
 
@@ -964,6 +987,16 @@ function App() {
             <p className="text-sm text-slate-400 font-bold uppercase tracking-wider font-sans">Blockchain Safety Dashboard</p>
           </div>
 
+          {role === 'ward' && isAccountFrozen && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-2xl px-6 py-4 flex items-center space-x-4 shadow-lg shadow-red-500/5 animate-pulse">
+              <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
+              <div>
+                <h5 className="text-red-400 font-black text-sm">⚠️ 账户已被冻结</h5>
+                <p className="text-slate-400 text-xs mt-0.5">该账户已被管理员或您的监护人冻结，消费支付与转账功能已全面暂停。请联系监护人进行解冻。</p>
+              </div>
+            </div>
+          )}
+
           {role === 'guardian' ? (
             <div className="space-y-8">
               {/* 被监护人列表 */}
@@ -1030,7 +1063,14 @@ function App() {
                           <User className="w-5 h-5" />
                         </div>
                         <div className="overflow-hidden flex-1">
-                          <p className="text-white font-bold text-sm truncate">{ward.accountName}</p>
+                          <p className="text-white font-bold text-sm truncate flex items-center space-x-2">
+                            <span>{ward.accountName}</span>
+                            {ward.isFrozen && (
+                              <span className="bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">
+                                已冻结
+                              </span>
+                            )}
+                          </p>
                           <p className="text-slate-400 text-sm font-mono leading-none mb-1">{ward.phone}</p>
                           <p className="text-slate-400 text-xs tracking-wide font-mono truncate">{ward.address}</p>
                           <p className="text-blue-400 text-[11px] font-bold mt-1">当前消费阈值: {ward.threshold} 元</p>
@@ -1055,12 +1095,29 @@ function App() {
                               >取消</button>
                             </div>
                           ) : (
-                            <button 
-                              onClick={() => setEditingThreshold({ address: ward.address, amount: ward.threshold })}
-                              className="px-3 py-1.5 border border-blue-500/20 hover:bg-blue-500/10 text-blue-400 rounded-xl text-xs font-bold transition-all duration-300"
-                            >
-                              修改阈值
-                            </button>
+                            <div className="flex flex-col space-y-2">
+                              <button 
+                                onClick={() => setEditingThreshold({ address: ward.address, amount: ward.threshold })}
+                                className="px-3 py-1.5 border border-blue-500/20 hover:bg-blue-500/10 text-blue-400 rounded-xl text-xs font-bold transition-all duration-300 whitespace-nowrap"
+                              >
+                                修改阈值
+                              </button>
+                              <button 
+                                disabled={freezingWard === ward.address}
+                                onClick={() => handleToggleFreeze(ward.address, ward.isFrozen)}
+                                className={`px-3 py-1.5 border rounded-xl text-xs font-bold transition-all duration-300 whitespace-nowrap ${
+                                  ward.isFrozen
+                                    ? 'border-green-500/20 hover:bg-green-500/10 text-green-400 hover:scale-[1.02] active:scale-[0.98]'
+                                    : 'border-red-500/20 hover:bg-red-500/10 text-red-400 hover:scale-[1.02] active:scale-[0.98]'
+                                }`}
+                              >
+                                {freezingWard === ward.address ? (
+                                  <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin mx-auto"></div>
+                                ) : (
+                                  ward.isFrozen ? '解冻账户' : '冻结账户'
+                                )}
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1300,8 +1357,9 @@ function App() {
                     </p>
                   </div>
                   <button
+                    disabled={isAccountFrozen}
                     onClick={handleOpenScan}
-                    className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black px-6 py-3.5 rounded-2xl text-xs transition-all duration-300 shadow-md shadow-emerald-500/10 active:scale-95 shrink-0 hover:scale-[1.02]"
+                    className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black px-6 py-3.5 rounded-2xl text-xs transition-all duration-300 shadow-md shadow-emerald-500/10 active:scale-95 shrink-0 hover:scale-[1.02] disabled:opacity-30 disabled:hover:scale-100 disabled:active:scale-100 disabled:cursor-not-allowed"
                   >
                     立即扫码付款
                   </button>
@@ -1349,8 +1407,8 @@ function App() {
 
                   <button
                     type="submit"
-                    disabled={isAlipayLoading}
-                    className="w-full mt-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:from-emerald-800 disabled:to-emerald-800 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/10 hover:shadow-emerald-500/20 transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center space-x-2"
+                    disabled={isAlipayLoading || isAccountFrozen}
+                    className="w-full mt-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:from-emerald-800 disabled:to-emerald-800 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/10 hover:shadow-emerald-500/20 transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center space-x-2 disabled:opacity-30 disabled:active:scale-100 disabled:cursor-not-allowed"
                   >
                     {isAlipayLoading ? (
                       <>

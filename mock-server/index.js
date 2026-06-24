@@ -83,6 +83,7 @@ const categoryNames = {
 
 const mockTrades = new Map();
 const realTradesBackup = new Map(); // Backup amounts for query fallback
+const activeOrders = new Map();
 
 // 3. 发起支付宝沙箱支付 (预创建订单以获取二维码)
 app.post("/api/alipay/pay", async (req, res) => {
@@ -92,6 +93,16 @@ app.post("/api/alipay/pay", async (req, res) => {
     try {
         // --- 智能合约风控规则引擎前置校验 ---
         const contract = paymentService.contract;
+
+        // 0. 检查是否已被冻结
+        const isFrozen = await contract.isFrozen(wardAddress);
+        if (isFrozen) {
+            console.log(`⚠️ [Risk Control] Transaction rejected: Account ${wardAddress} is frozen!`);
+            return res.status(400).json({
+                success: false,
+                error: "支付失败：该账户已被冻结，无法进行消费！"
+            });
+        }
         
         let skipRiskControl = false;
         if (approvedTxId) {
@@ -141,10 +152,15 @@ app.post("/api/alipay/pay", async (req, res) => {
             }
         }
         
-        const code = categoryCodes[subject] || "SHOP";
-        const merchStr = merchantAddress ? merchantAddress.replace(/^0x/, "") : "0";
-        const approvedId = approvedTxId || "0";
-        const outTradeNo = `${wardAddress.replace(/^0x/, "")}_${code}_${merchStr}_${approvedId}_${Date.now()}`;
+        const outTradeNo = `PAY_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        activeOrders.set(outTradeNo, {
+            wardAddress,
+            merchantAddress,
+            amount,
+            subject,
+            approvedTxId
+        });
+
         const result = await alipaySdk.exec('alipay.trade.precreate', {
             bizContent: {
                 outTradeNo: outTradeNo,
@@ -236,11 +252,20 @@ app.get("/api/alipay/query", async (req, res) => {
         if (trade.status === 'TRADE_SUCCESS') {
             if (!processingTrades.has(outTradeNo)) {
                 const processPromise = (async () => {
-                    const parts = outTradeNo.split("_");
-                    const addressRaw = parts[0];
-                    const code = parts[1];
-                    const merchRaw = parts[2];
-                    const approvedTxIdRaw = parts[3];
+                    let addressRaw, code, merchRaw, approvedTxIdRaw;
+                    const order = activeOrders.get(outTradeNo);
+                    if (order) {
+                        addressRaw = order.wardAddress.replace(/^0x/, "");
+                        code = categoryCodes[order.subject] || "SHOP";
+                        merchRaw = order.merchantAddress ? order.merchantAddress.replace(/^0x/, "") : "0";
+                        approvedTxIdRaw = order.approvedTxId || "0";
+                    } else {
+                        const parts = outTradeNo.split("_");
+                        addressRaw = parts[0];
+                        code = parts[1];
+                        merchRaw = parts[2];
+                        approvedTxIdRaw = parts[3];
+                    }
                     const wardAddress = "0x" + addressRaw;
                     const merchantAddress = merchRaw !== "0" ? "0x" + merchRaw : null;
                     const category = categoryNames[code] || "模拟消费";
@@ -248,6 +273,8 @@ app.get("/api/alipay/query", async (req, res) => {
 
                     if (approvedTxIdRaw && approvedTxIdRaw !== "0") {
                         console.log(`✅ [Mock Alipay Query] Verified success for previously approved transaction ID: ${approvedTxIdRaw}. Bypassing duplicate on-chain record.`);
+                        const markResult = await paymentService.markPaymentSuccess(approvedTxIdRaw);
+                        if (!markResult.success) throw new Error(markResult.error);
                         return true;
                     } else {
                         console.log(`✅ [Mock Alipay Query] Verified success! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
@@ -291,11 +318,20 @@ app.get("/api/alipay/query", async (req, res) => {
             if (!processingTrades.has(outTradeNo)) {
                 // 将处理逻辑封装为一个 Promise
                 const processPromise = (async () => {
-                    const parts = outTradeNo.split("_");
-                    const addressRaw = parts[0];
-                    const code = parts[1];
-                    const merchRaw = parts[2];
-                    const approvedTxIdRaw = parts[3];
+                    let addressRaw, code, merchRaw, approvedTxIdRaw;
+                    const order = activeOrders.get(outTradeNo);
+                    if (order) {
+                        addressRaw = order.wardAddress.replace(/^0x/, "");
+                        code = categoryCodes[order.subject] || "SHOP";
+                        merchRaw = order.merchantAddress ? order.merchantAddress.replace(/^0x/, "") : "0";
+                        approvedTxIdRaw = order.approvedTxId || "0";
+                    } else {
+                        const parts = outTradeNo.split("_");
+                        addressRaw = parts[0];
+                        code = parts[1];
+                        merchRaw = parts[2];
+                        approvedTxIdRaw = parts[3];
+                    }
                     const wardAddress = "0x" + addressRaw;
                     const merchantAddress = merchRaw !== "0" ? "0x" + merchRaw : null;
                     const category = categoryNames[code] || "模拟消费";
@@ -303,6 +339,8 @@ app.get("/api/alipay/query", async (req, res) => {
 
                     if (approvedTxIdRaw && approvedTxIdRaw !== "0") {
                         console.log(`✅ [Alipay Query] Verified success for previously approved transaction ID: ${approvedTxIdRaw}. Bypassing duplicate on-chain record.`);
+                        const markResult = await paymentService.markPaymentSuccess(approvedTxIdRaw);
+                        if (!markResult.success) throw new Error(markResult.error);
                         return true;
                     } else {
                         console.log(`✅ [Alipay Query] Verified success! Ward: ${wardAddress}, Amount: ${amount}, Category: ${category}, Merchant: ${merchantAddress}`);
@@ -504,11 +542,20 @@ app.get("/api/alipay/return", async (req, res) => {
         }
 
         const outTradeNo = req.query.out_trade_no;
-        const parts = outTradeNo.split("_");
-        const addressRaw = parts[0];
-        const code = parts[1];
-        const merchRaw = parts[2];
-        const approvedTxIdRaw = parts[3];
+        let addressRaw, code, merchRaw, approvedTxIdRaw;
+        const order = activeOrders.get(outTradeNo);
+        if (order) {
+            addressRaw = order.wardAddress.replace(/^0x/, "");
+            code = categoryCodes[order.subject] || "SHOP";
+            merchRaw = order.merchantAddress ? order.merchantAddress.replace(/^0x/, "") : "0";
+            approvedTxIdRaw = order.approvedTxId || "0";
+        } else {
+            const parts = outTradeNo.split("_");
+            addressRaw = parts[0];
+            code = parts[1];
+            merchRaw = parts[2];
+            approvedTxIdRaw = parts[3];
+        }
         const wardAddress = "0x" + addressRaw;
         const merchantAddress = merchRaw !== "0" ? "0x" + merchRaw : null;
         const category = categoryNames[code] || "模拟消费";
@@ -517,7 +564,8 @@ app.get("/api/alipay/return", async (req, res) => {
         let result;
         if (approvedTxIdRaw && approvedTxIdRaw !== "0") {
             console.log(`✅ [Alipay Return] Verified success for previously approved transaction ID: ${approvedTxIdRaw}. Bypassing duplicate on-chain record.`);
-            result = { success: true };
+            const markResult = await paymentService.markPaymentSuccess(approvedTxIdRaw);
+            result = markResult;
         } else {
             if (processingTrades.has(outTradeNo)) {
                 console.log(`✅ [Alipay Return] Order ${outTradeNo} is already being recorded or has been recorded by query poller. Reusing it.`);

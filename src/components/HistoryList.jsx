@@ -37,7 +37,7 @@ export const HistoryList = ({ txs, role, onContinuePay }) => {
                     <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1.5"></span>
                     已批准
                   </span>
-                  {role === 'ward' && onContinuePay && !localStorage.getItem(`paid_tx_${tx.id}`) && (
+                  {role === 'ward' && onContinuePay && !tx.isPaid && (
                     <button 
                       onClick={() => onContinuePay(tx)}
                       className="text-xs bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white px-3 py-1.5 rounded-lg shadow-md shadow-emerald-500/20 transition-transform hover:scale-105 active:scale-95 flex items-center space-x-1"

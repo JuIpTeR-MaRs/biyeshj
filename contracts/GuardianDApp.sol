@@ -103,6 +103,9 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     /// @notice 账户地址 => 是否被冻结
     mapping(address => bool) public isFrozen;
 
+    /// @notice 被监护人地址 => 交易 ID 列表
+    mapping(address => uint256[]) public wardTransactions;
+
     // --- 事件 ---
 
     /// @notice 消费低于阈值或无监护人自动批准时触发
@@ -307,6 +310,9 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
             isPaid: !isPending
         });
 
+        // 记录被监护人的交易 ID
+        wardTransactions[_ward].push(txCounter);
+
         if (isPending) {
             emit PaymentPendingApproval(txCounter, _ward, _amount);
         } else {
@@ -420,5 +426,14 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     function updateOracle(address _newOracle) external onlyOwner {
         if (_newOracle == address(0)) revert InvalidAddress();
         oracle = _newOracle;
+    }
+
+    /**
+     * @notice 获取被监护人的所有交易 ID
+     * @param _ward 被监护人地址
+     * @return 交易 ID 数组
+     */
+    function getWardTransactionIds(address _ward) external view returns (uint256[] memory) {
+        return wardTransactions[_ward];
     }
 }

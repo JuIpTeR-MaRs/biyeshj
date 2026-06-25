@@ -95,6 +95,11 @@ function App() {
   const [alipaySubject, setAlipaySubject] = useState('餐饮美食');
   const [isAlipayLoading, setIsAlipayLoading] = useState(false);
   const [historyTxs, setHistoryTxs] = useState([]);
+  const [selectedWardFilter, setSelectedWardFilter] = useState('all');
+  const filteredHistoryTxs = React.useMemo(() => {
+    if (selectedWardFilter === 'all') return historyTxs;
+    return historyTxs.filter(tx => tx.ward.toLowerCase() === selectedWardFilter.toLowerCase());
+  }, [historyTxs, selectedWardFilter]);
 
   // 支付宝扫码支付弹窗状态
   const [showQrModal, setShowQrModal] = useState(false);
@@ -120,6 +125,7 @@ function App() {
     setGuardianInfos([]);
     setPendingGuardianInfo(null);
     setActiveWards([]);
+    setSelectedWardFilter('all');
   };
 
   const fetchData = useCallback(async () => {
@@ -147,48 +153,60 @@ function App() {
         timestamp: d[3], merchantType: d[4], isPending: d[5]
       })));
 
-      // 2. 获取作为监护人收到的绑定请求列表
+      // 2. 获取作为监护人收到的绑定请求列表 (并行读取优化)
       const allAccounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
-      const requests = [];
-      for (const accInfo of allAccounts) {
+      const pendingRequestPromises = allAccounts.map(async (accInfo) => {
         try {
           const pending = await contract.pendingWardToGuardian(accInfo.address);
           if (pending.toLowerCase() === account.toLowerCase()) {
-            requests.push(accInfo);
+            return accInfo;
           }
         } catch (e) {}
-      }
+        return null;
+      });
+      const pendingRequestResults = await Promise.all(pendingRequestPromises);
+      const requests = pendingRequestResults.filter(r => r !== null);
       setPendingRequests(requests);
 
-      // 3. 获取我名下的被监护人列表 (作为监护人角色)
-      const wardsList = [];
-      for (const accInfo of allAccounts) {
+      // 3. 获取我名下的被监护人列表 (作为监护人角色) (并行读取优化)
+      const wardCheckPromises = allAccounts.map(async (accInfo) => {
         try {
           const isG = await contract.isWardGuardian(accInfo.address, account);
           if (isG) {
-            const thres = await contract.threshold(accInfo.address);
-            const frozen = await contract.isFrozen(accInfo.address);
-            wardsList.push({...accInfo, threshold: thres.toString(), isFrozen: frozen});
+            const [thres, frozen] = await Promise.all([
+              contract.threshold(accInfo.address),
+              contract.isFrozen(accInfo.address)
+            ]);
+            return { ...accInfo, threshold: thres.toString(), isFrozen: frozen };
           }
         } catch (e) {}
-      }
+        return null;
+      });
+      const wardCheckResults = await Promise.all(wardCheckPromises);
+      const wardsList = wardCheckResults.filter(w => w !== null);
       setActiveWards(wardsList);
 
-      // 获取当前用户的阈值和冻结状态
+      // 获取当前用户的阈值和冻结状态 (并行读取优化)
       try {
-        const myThres = await contract.threshold(account);
+        const [myThres, frozen] = await Promise.all([
+          contract.threshold(account),
+          contract.isFrozen(account)
+        ]);
         setMyThreshold(myThres.toString());
-        const frozen = await contract.isFrozen(account);
         setIsAccountFrozen(frozen);
       } catch (e) {}
 
 
-      // 4. 被监护人信息：查询当前用户的监护人和申请中的监护人
+      // 4. 被监护人信息：查询当前用户的监护人和申请中的监护人 (并行读取优化)
       let activeGuardians = [];
       let reqGuardian = "0x0000000000000000000000000000000000000000";
       try {
-        activeGuardians = await contract.getWardGuardians(account);
-        reqGuardian = await contract.pendingWardToGuardian(account);
+        const [guardiansListRes, reqGuardianRes] = await Promise.all([
+          contract.getWardGuardians(account).catch(() => []),
+          contract.pendingWardToGuardian(account).catch(() => "0x0000000000000000000000000000000000000000")
+        ]);
+        activeGuardians = guardiansListRes;
+        reqGuardian = reqGuardianRes;
       } catch (e) {
         console.error("Query ward status error:", e);
       }
@@ -226,38 +244,52 @@ function App() {
       }
       setRole(resolvedRole);
 
-      // 6. 获取历史消费记录
-      const txCount = await contract.txCounter();
-      const count = Number(txCount);
-      const allTxs = [];
-      for (let i = 1; i <= count; i++) {
-        try {
-          const tx = await contract.transactions(i);
-          allTxs.push({
-            id: tx[0].toString(),
-            ward: tx[1],
-            amount: tx[2].toString(),
-            timestamp: Number(tx[3]),
-            merchantType: tx[4],
-            isPending: tx[5],
-            isApproved: tx[6]
-          });
-        } catch (e) {
-          console.error("Error fetching transaction history:", i, e);
+      // 6. 获取历史消费记录（按钱包地址并行索引优化）
+      const currentRole = resolvedRole === 'guardian' ? 'guardian' : 'ward';
+      let txIds = [];
+      try {
+        if (currentRole === 'ward') {
+          txIds = await contract.getWardTransactionIds(account);
+        } else {
+          const wardIdsPromises = wardsList.map(w => contract.getWardTransactionIds(w.address));
+          // 同时加载监护人自身的消费流水
+          wardIdsPromises.push(contract.getWardTransactionIds(account));
+          const wardIdsResults = await Promise.all(wardIdsPromises);
+          txIds = wardIdsResults.flat();
         }
+      } catch (e) {
+        console.error("Error fetching ward transaction ids from contract:", e);
       }
 
-      const currentRole = resolvedRole === 'guardian' ? 'guardian' : 'ward';
-      let filteredTxs = [];
-      if (currentRole === 'ward') {
-        filteredTxs = allTxs.filter(tx => tx.ward.toLowerCase() === account.toLowerCase());
-      } else {
-        const wardAddresses = wardsList.map(w => w.address.toLowerCase());
-        filteredTxs = allTxs.filter(tx => wardAddresses.includes(tx.ward.toLowerCase()));
-      }
+      const promises = txIds.map(id =>
+        contract.transactions(id).catch(e => {
+          console.error("Error fetching transaction details for id:", id.toString(), e);
+          return null;
+        })
+      );
+      
+      const txResults = await Promise.all(promises);
+      const filteredTxs = txResults
+        .filter(tx => tx !== null)
+        .map(tx => ({
+          id: tx[0].toString(),
+          ward: tx[1],
+          amount: tx[2].toString(),
+          timestamp: Number(tx[3]),
+          merchantType: tx[4],
+          isPending: tx[5],
+          isApproved: tx[6],
+          isPaid: tx[7]
+        }));
 
       // 关联被监护人姓名
       const mappedTxs = filteredTxs.map(tx => {
+        if (tx.ward.toLowerCase() === account.toLowerCase()) {
+          return {
+            ...tx,
+            wardName: "我 (监护人)"
+          };
+        }
         const info = allAccounts.find(a => a.address.toLowerCase() === tx.ward.toLowerCase());
         return {
           ...tx,
@@ -870,6 +902,28 @@ function App() {
       );
     };
 
+    const onThresholdSet = async (ward, amount) => {
+      if (Date.now() - subscriptionTime < 2000) return;
+      await fetchData();
+      const curAccount = accountRef.current;
+      if (curAccount && ward.toLowerCase() === curAccount.toLowerCase()) {
+        toast.info(`ℹ️ 监护人已将您的单笔消费预警阈值更新为 ${amount.toString()} 元。`);
+      }
+    };
+
+    const onAccountFrozen = async (accountAddr, frozen, operator) => {
+      if (Date.now() - subscriptionTime < 2000) return;
+      await fetchData();
+      const curAccount = accountRef.current;
+      if (curAccount && accountAddr.toLowerCase() === curAccount.toLowerCase()) {
+        if (frozen) {
+          toast.error("⚠️ 您的账户已被冻结，无法进行消费支付！");
+        } else {
+          toast.success("✅ 您的账户已被成功解冻。");
+        }
+      }
+    };
+
     const setupListeners = async () => {
       if (account && isLoggedIn) {
         fetchData();
@@ -879,6 +933,8 @@ function App() {
           contractInstance.on("PaymentAutoApproved", onAutoApproved);
           contractInstance.on("TransactionConfirmed", onConfirmed);
           contractInstance.on("TransactionRejected", onRejected);
+          contractInstance.on("ThresholdSet", onThresholdSet);
+          contractInstance.on("AccountFrozen", onAccountFrozen);
         }
       }
     };
@@ -892,6 +948,8 @@ function App() {
         contractInstance.off("PaymentAutoApproved", onAutoApproved);
         contractInstance.off("TransactionConfirmed", onConfirmed);
         contractInstance.off("TransactionRejected", onRejected);
+        contractInstance.off("ThresholdSet", onThresholdSet);
+        contractInstance.off("AccountFrozen", onAccountFrozen);
       }
     };
   }, [account, isLoggedIn, fetchData]);
@@ -999,6 +1057,29 @@ function App() {
 
           {role === 'guardian' ? (
             <div className="space-y-8">
+              {/* 您的钱包已受保护 (监护人版本) */}
+              <div className="bg-gradient-to-br from-slate-900 via-blue-900/20 to-slate-900 border border-blue-500/20 rounded-[32px] p-10 text-white shadow-xl shadow-blue-500/5 relative overflow-hidden animate-in fade-in slide-in-from-top-4 duration-500">
+                <div className="absolute top-[-30%] right-[-10%] w-[50%] h-[50%] bg-blue-500/10 blur-[80px] rounded-full pointer-events-none"></div>
+                <h3 className="text-2xl font-bold mb-4">您的钱包已受保护</h3>
+                <p className="text-slate-400 leading-relaxed mb-8 opacity-90 text-sm max-w-2xl font-sans">
+                  系统已开启监护人安全防护。作为监护人，您正在通过区块链账本实时监控和审批名下被监护成员的日常消费支出。
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="bg-slate-950/60 backdrop-blur-md rounded-2xl p-4 border border-slate-850/60">
+                    <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">当前状态</p>
+                    <p className="text-lg font-bold text-slate-100">运行中</p>
+                  </div>
+                  <div className="bg-slate-950/60 backdrop-blur-md rounded-2xl p-4 border border-slate-850/60">
+                    <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">智能合约</p>
+                    <p className="text-lg font-bold text-slate-100">已验证</p>
+                  </div>
+                  <div className="bg-slate-950/60 backdrop-blur-md rounded-2xl p-4 border border-slate-850/60 col-span-2 md:col-span-1">
+                    <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">成员管辖数</p>
+                    <p className="text-lg font-bold text-blue-400">{activeWards.length} 人</p>
+                  </div>
+                </div>
+              </div>
+
               {/* 被监护人列表 */}
               <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl">
                 <div className="flex justify-between items-center mb-6">
@@ -1195,15 +1276,55 @@ function App() {
                 </form>
               </div>
 
-              <AiAnalysisCard txs={historyTxs} role={role} />
+              <AiAnalysisCard txs={filteredHistoryTxs} role={role} />
 
-              <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl">
-                <HistoryList txs={historyTxs} role={role} onContinuePay={handleContinuePay} />
+              <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/60 pb-5">
+                  <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest px-1">
+                    👥 消费成员过滤
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setSelectedWardFilter('all')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all duration-200 ${
+                        selectedWardFilter === 'all'
+                          ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-md shadow-blue-500/5'
+                          : 'bg-slate-950/40 border-slate-850 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      全部成员
+                    </button>
+                    <button
+                      onClick={() => setSelectedWardFilter(account)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all duration-200 ${
+                        selectedWardFilter.toLowerCase() === account.toLowerCase()
+                          ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-md shadow-blue-500/5'
+                          : 'bg-slate-950/40 border-slate-850 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      我的消费
+                    </button>
+                    {activeWards.map(w => (
+                      <button
+                        key={w.address}
+                        onClick={() => setSelectedWardFilter(w.address)}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all duration-200 ${
+                          selectedWardFilter === w.address
+                            ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-md shadow-blue-500/5'
+                            : 'bg-slate-950/40 border-slate-850 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {w.accountName}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <HistoryList txs={filteredHistoryTxs} role={role} onContinuePay={handleContinuePay} />
               </div>
             </div>
           ) : (
             <div className="space-y-8">
-              <div className="bg-gradient-to-br from-slate-900 via-emerald-955/20 to-slate-900 border border-emerald-500/20 rounded-[32px] p-10 text-white shadow-xl shadow-emerald-500/5 relative overflow-hidden">
+              <div className="bg-gradient-to-br from-slate-900 via-emerald-900/20 to-slate-900 border border-emerald-500/20 rounded-[32px] p-10 text-white shadow-xl shadow-emerald-500/5 relative overflow-hidden">
                 <div className="absolute top-[-30%] right-[-10%] w-[50%] h-[50%] bg-emerald-500/10 blur-[80px] rounded-full pointer-events-none"></div>
                 <h3 className="text-2xl font-bold mb-4">您的钱包已受保护</h3>
                 <p className="text-slate-400 leading-relaxed mb-8 opacity-90 text-sm max-w-2xl font-sans">

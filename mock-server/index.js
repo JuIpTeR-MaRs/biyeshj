@@ -90,6 +90,7 @@ app.post("/api/alipay/pay", async (req, res) => {
     const { amount, subject, wardAddress, merchantAddress, approvedTxId } = req.body;
     console.log(`💳 [Alipay] Precreating order for ward ${wardAddress}, amount: ${amount} Wei, category: ${subject}, merchant: ${merchantAddress}`);
     
+    const outTradeNo = `PAY_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
     try {
         // --- 智能合约风控规则引擎前置校验 ---
         const contract = paymentService.contract;
@@ -152,7 +153,6 @@ app.post("/api/alipay/pay", async (req, res) => {
             }
         }
         
-        const outTradeNo = `PAY_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
         activeOrders.set(outTradeNo, {
             wardAddress,
             merchantAddress,

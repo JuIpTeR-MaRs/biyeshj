@@ -11,6 +11,7 @@ export const CONTRACT_ABI = [
   "function threshold(address) view returns (uint256)",
   "function transactions(uint256) view returns (uint256 id, address ward, uint256 amount, uint256 timestamp, string merchantType, bool isPending, bool isApproved, bool isPaid)",
   "function txCounter() view returns (uint256)",
+  "function getWardTransactionIds(address) view returns (uint256[] memory)",
   "function confirmTransaction(uint256 _txId, bool _approve) external",
   "function markPaymentSuccess(uint256 _txId) external",
   "function requestGuardian(address _guardian) external",

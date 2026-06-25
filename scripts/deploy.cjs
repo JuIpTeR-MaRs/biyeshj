@@ -63,7 +63,7 @@ async function main() {
         for (const row of rows) {
           const tx = await dapp.bindGuardian(row.ward_address, row.guardian_address);
           await tx.wait();
-          console.log(`   ✅ Restored binding: ${row.ward_address} -> ${row.guardian_address}`);
+          // console.log(`   ✅ Restored binding: ${row.ward_address} -> ${row.guardian_address}`);
         }
       }
 
@@ -73,7 +73,7 @@ async function main() {
         for (const row of thresholdRows) {
           const tx = await dapp.adminSetThreshold(row.ward_address, Math.floor(row.threshold_amount));
           await tx.wait();
-          console.log(`   ✅ Restored threshold: ${row.ward_address} -> ${row.threshold_amount}`);
+          // console.log(`   ✅ Restored threshold: ${row.ward_address} -> ${row.threshold_amount}`);
         }
       }
 
@@ -85,16 +85,16 @@ async function main() {
           const tx = await dapp.recordPayment(row.ward_address, Math.floor(row.amount), row.merchant_type);
           const receipt = await tx.wait();
           contractTxId++;
-          console.log(`   ✅ Restored transaction: ${row.ward_address} -> ${row.amount} Wei (New Tx Hash: ${receipt.hash}, Contract Tx ID: ${contractTxId})`);
+          // console.log(`   ✅ Restored transaction: ${row.ward_address} -> ${row.amount} Wei (New Tx Hash: ${receipt.hash}, Contract Tx ID: ${contractTxId})`);
           
           // Restore approval status if column exists
           if (row.is_approved !== undefined && row.is_pending !== undefined) {
               if (row.is_approved == 1 && row.is_pending == 0) {
                   await (await dapp.adminConfirmTransaction(contractTxId, true)).wait();
-                  console.log(`      ↳ Restored status: Approved`);
+                  // console.log(`      ↳ Restored status: Approved`);
               } else if (row.is_pending == 0 && row.is_approved == 0) {
                   await (await dapp.adminConfirmTransaction(contractTxId, false)).wait();
-                  console.log(`      ↳ Restored status: Rejected`);
+                  // console.log(`      ↳ Restored status: Rejected`);
               }
           }
 
@@ -102,7 +102,7 @@ async function main() {
           if (row.is_paid == 1) {
               try {
                   await (await dapp.markPaymentSuccess(contractTxId)).wait();
-                  console.log(`      ↳ Restored status: Paid`);
+                  // console.log(`      ↳ Restored status: Paid`);
               } catch (paidErr) {
                   console.warn(`      ↳ ⚠️ Could not mark restored transaction ${contractTxId} as paid on chain:`, paidErr.message);
               }

@@ -21,6 +21,7 @@ typechain-types/
 
 # Electron
 dist_electron/
+release/
 
 # Editor directories and files
 .vscode/*

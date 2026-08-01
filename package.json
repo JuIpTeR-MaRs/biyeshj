@@ -17,7 +17,29 @@
     "mock:start": "node mock-server/index.js",
     "app": "electron .",
     "app:ward": "electron . --session=ward",
-    "app:guardian": "electron . --session=guardian"
+    "app:guardian": "electron . --session=guardian",
+    "app:dist": "vite build && electron-builder"
+  },
+  "build": {
+    "appId": "com.guardiandapp.bank",
+    "productName": "GuardianDApp",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.6.1",
@@ -42,6 +64,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.19",
     "electron": "^42.0.1",
+    "electron-builder": "^26.15.3",
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.6",

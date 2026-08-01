@@ -20,13 +20,17 @@ function createWindow() {
     titleBarStyle: 'hiddenInset', 
   });
 
-  const loadApp = () => {
-    mainWindow.loadURL('http://localhost:5173').catch(err => {
-      console.warn("⚠️ Failed to load Vite server URL, retrying in 2 seconds...", err.message);
-      setTimeout(loadApp, 2000);
-    });
-  };
-  loadApp();
+  if (app.isPackaged) {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  } else {
+    const loadApp = () => {
+      mainWindow.loadURL('http://localhost:5173').catch(err => {
+        console.warn("⚠️ Failed to load Vite server URL, retrying in 2 seconds...", err.message);
+        setTimeout(loadApp, 2000);
+      });
+    };
+    loadApp();
+  }
 }
 
 app.whenReady().then(() => {

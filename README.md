@@ -118,3 +118,30 @@ DEEPSEEK_API_KEY=您的DeepSeek_API_KEY
 | **监护人 (李四)** | `13826193664` | `123` | 监护人账户。可管理张三，审批其超额大额消费，设定限额，生成 AI 监护建议。 |
 | **商户端 (测试)** | `merchant` | `123` | 模拟收款商户。可向被监护人发起扣款请求，用于触发支付及预警流程。 |
 | **超级管理员** | `admin` | `admin123` | 平台最高管理者。拥有全局安全视图，对全网交易流水进行数据大屏展示及 AI 系统风控审计。 |
+
+---
+
+## 📦 第四步：桌面客户端打包与运行
+
+项目支持将 Electron 桌面客户端打包为标准的 `.exe` 可执行文件。
+
+### 1. 执行客户端打包
+在控制台执行以下命令：
+```bash
+npm run app:dist
+```
+该命令会自动先打包 Vite 前端静态资源（生成到 `dist` 目录），随后使用 `electron-builder` 构建 Windows 可执行应用。
+
+### 2. 打包产物说明
+打包成功后，所有产物将自动输出在项目根目录下的 [**`release/`**](file:///d:/biyesheji/release) 目录中：
+
+- 🚀 **便携版（单文件 EXE，推荐）**: [release/GuardianDApp 0.0.0.exe](file:///d:/biyesheji/release/GuardianDApp%200.0.0.exe) （无需安装，双击直接运行）
+- 💿 **安装包（NSIS 简易安装程序）**: [release/GuardianDApp Setup 0.0.0.exe](file:///d:/biyesheji/release/GuardianDApp%20Setup%200.0.0.exe) （双击可安装至电脑）
+- 📁 **免安装绿色目录**: [release/win-unpacked/GuardianDApp.exe](file:///d:/biyesheji/release/win-unpacked/GuardianDApp.exe) （可以直接在解压目录中双击运行）
+
+### 3. 打包后 App 运行步骤
+运行打包后的应用前，请确保后台依赖（区块链节点与 API 服务）已就绪：
+
+1. **拉起后端服务**：双击运行根目录下的 [**`start-backend.bat`**](file:///d:/biyesheji/start-backend.bat)（启动区块链 Hardhat 节点、部署智能合约并启动后端 Mock 服务器）。
+2. **打开桌面应用**：双击运行 [release/GuardianDApp 0.0.0.exe](file:///d:/biyesheji/release/GuardianDApp%200.0.0.exe) 或已经安装好的桌面应用图标即可体验。
+

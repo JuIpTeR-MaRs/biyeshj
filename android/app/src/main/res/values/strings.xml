@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">GuardianDApp</string>
+    <string name="title_activity_main">GuardianDApp</string>
+    <string name="package_name">com.guardiandapp.mobile</string>
+    <string name="custom_url_scheme">com.guardiandapp.mobile</string>
+</resources>

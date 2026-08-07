@@ -145,3 +145,25 @@ npm run app:dist
 1. **拉起后端服务**：双击运行根目录下的 [**`start-backend.bat`**](file:///d:/biyesheji/start-backend.bat)（启动区块链 Hardhat 节点、部署智能合约并启动后端 Mock 服务器）。
 2. **打开桌面应用**：双击运行 [release/GuardianDApp 0.0.0.exe](file:///d:/biyesheji/release/GuardianDApp%200.0.0.exe) 或已经安装好的桌面应用图标即可体验。
 
+---
+
+## 📱 第五步：移动手机端 (Android / 跨平台 App) 构建与运行
+
+项目已完成 Capacitor 跨平台移动端工程适配，能够将系统一键导出为标准的 **Android 原生工程**。
+
+### 1. 移动端资源构建与同步
+在控制台运行以下命令，会自动编译前端 Vite 静态工程并同步到 Android 原生目录：
+```bash
+npm run cap:sync
+```
+
+### 2. 导出 Android APK 安装包
+1. 打开 **Android Studio** 软件。
+2. 选择 `Open Project`，打开项目根目录下的 [**`android/`**](file:///d:/biyesheji/android) 文件夹。
+3. 点击顶部菜单 `Build` ➔ `Build Bundle(s) / APK(s)` ➔ `Build APK(s)`，即可成功打出可在任意 Android 手机上安装运行的 **`.apk` 文件**！
+
+### 3. 手机与电脑多端实时同步（测试方法）
+* **局域网连接**：确保手机与电脑连接同一 Wi-Fi，手机浏览器或 App 访问 `http://<电脑局域网IP>:3000` 即可与电脑端的区块链、数据库实时同步数据。
+* **快捷命令**：在控制台运行 `npm run cap:android` 亦可自动调起 Android Studio 或已连接的手机调试设备进行真机运行。
+
+

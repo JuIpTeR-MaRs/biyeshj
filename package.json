@@ -18,7 +18,9 @@
     "app": "electron .",
     "app:ward": "electron . --session=ward",
     "app:guardian": "electron . --session=guardian",
-    "app:dist": "vite build && electron-builder"
+    "app:dist": "vite build && electron-builder",
+    "cap:sync": "vite build && cap sync",
+    "cap:android": "cap open android"
   },
   "build": {
     "appId": "com.guardiandapp.bank",
@@ -42,6 +44,7 @@
     }
   },
   "dependencies": {
+    "@capacitor/core": "^8.5.0",
     "@openzeppelin/contracts": "^5.6.1",
     "alipay-sdk": "^4.14.0",
     "clsx": "^2.1.1",
@@ -57,6 +60,8 @@
     "tailwind-merge": "^2.3.0"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
     "@eslint/js": "^9.1.1",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@types/react": "^18.2.66",

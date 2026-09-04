@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { AiAnalysisCard } from '../AiAnalysis/AiAnalysisCard';
 import { Navbar } from '../layout/Navbar';
 import { getContract } from '../../utils/contract';
+import { getApiUrl } from '../../utils/api';
 
 export const AdminDashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('users');
@@ -64,7 +65,7 @@ export const AdminDashboard = ({ onLogout }) => {
     // Fetch DB data
     const fetchDbData = async () => {
       try {
-        const res = await fetch('/api/admin/all-data');
+        const res = await fetch(getApiUrl('/api/admin/all-data'));
         const data = await res.json();
         if (data.success) {
           setDbData({

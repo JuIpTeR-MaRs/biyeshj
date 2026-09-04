@@ -1,14 +1,17 @@
 import { ethers } from "ethers";
-import { getContract, CONTRACT_ADDRESS, CONTRACT_ABI, RPC_URL } from "../utils/contract";
+import { getContract, CONTRACT_ADDRESS, CONTRACT_ABI, getProvider } from "../utils/contract";
 
 /**
  * 前端以太坊智能合约交互服务单例 (ethers.js v6)
  */
 class ContractService {
   constructor() {
-    this.provider = new ethers.JsonRpcProvider(RPC_URL);
     this.contractAddress = CONTRACT_ADDRESS;
     this.abi = CONTRACT_ABI;
+  }
+
+  get provider() {
+    return getProvider();
   }
 
   /**

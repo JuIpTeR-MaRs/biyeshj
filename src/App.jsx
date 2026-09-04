@@ -13,7 +13,8 @@ import { AiAnalysisCard } from './components/AiAnalysis/AiAnalysisCard';
 import { MerchantDashboard } from './components/Merchant/MerchantDashboard';
 import { MessageCenter } from './components/MessageCenter';
 import { getContract, CONTRACT_ADDRESS, fundAccount } from './utils/contract';
-import { getLocalBankUser } from './utils/bankAccount';
+import { getLocalBankUser, getAllLocalAccounts } from './utils/bankAccount';
+import { getApiUrl } from './utils/api';
 
 // Global tracking to prevent duplicate notifications for the same order across component lifecycles or polling/postMessage races
 const notifiedTrades = new Set();
@@ -154,7 +155,7 @@ function App() {
       })));
 
       // 2. 获取作为监护人收到的绑定请求列表 (并行读取优化)
-      const allAccounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
+      const allAccounts = getAllLocalAccounts();
       const pendingRequestPromises = allAccounts.map(async (accInfo) => {
         try {
           const pending = await contract.pendingWardToGuardian(accInfo.address);
@@ -333,7 +334,7 @@ function App() {
 
       if (approve) {
         try {
-          await fetch('/api/guardian/bind', {
+          await fetch(getApiUrl('/api/guardian/bind'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ wardAddress, guardianAddress: account })
@@ -361,7 +362,7 @@ function App() {
     }
     setIsBinding(true);
     try {
-      const allAccounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
+      const allAccounts = getAllLocalAccounts();
       const guardianAcc = allAccounts.find(a => a.phone === bindPhone);
       if (!guardianAcc) {
         toast.error("未找到该手机号对应的账户，请确保监护人已注册");
@@ -399,7 +400,7 @@ function App() {
     }
     setIsAddingWard(true);
     try {
-      const allAccounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
+      const allAccounts = getAllLocalAccounts();
       const wardAcc = allAccounts.find(a => a.phone === wardPhoneInput);
       if (!wardAcc) {
         toast.error("未找到该手机号对应的账户，请确保被监护人已注册");
@@ -432,7 +433,7 @@ function App() {
       await tx2.wait();
 
       try {
-        await fetch('/api/guardian/bind', {
+        await fetch(getApiUrl('/api/guardian/bind'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ wardAddress: wardAcc.address, guardianAddress: account })
@@ -467,7 +468,7 @@ function App() {
       await tx.wait();
 
       try {
-        await fetch('/api/guardian/threshold', {
+        await fetch(getApiUrl('/api/guardian/threshold'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ wardAddress, amount: newThreshold })
@@ -540,7 +541,7 @@ function App() {
     }
     setIsScanPaying(true);
     try {
-      const response = await fetch("/api/alipay/pay", {
+      const response = await fetch(getApiUrl("/api/alipay/pay"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -588,7 +589,7 @@ function App() {
     // 发送取消订单请求到后台，防止后台或兜底模式自动录入成功
     if (qrOutTradeNo) {
       try {
-        await fetch("/api/alipay/cancel", {
+        await fetch(getApiUrl("/api/alipay/cancel"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ outTradeNo: qrOutTradeNo })
@@ -604,7 +605,7 @@ function App() {
 
     pollIntervalRef.current = setInterval(async () => {
       try {
-        const response = await fetch(`/api/alipay/query?outTradeNo=${outTradeNo}`);
+        const response = await fetch(getApiUrl(`/api/alipay/query?outTradeNo=${outTradeNo}`));
         const data = await response.json();
         if (data.success) {
           if (data.status === 'TRADE_SUCCESS') {
@@ -639,7 +640,7 @@ function App() {
       return false;
     }
     try {
-      const response = await fetch("/api/alipay/pay", {
+      const response = await fetch(getApiUrl("/api/alipay/pay"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -725,7 +726,7 @@ function App() {
     payingTxIdRef.current = tx.id;
     setPayingTxId(tx.id);
     try {
-      const response = await fetch("/api/alipay/pay", {
+      const response = await fetch(getApiUrl("/api/alipay/pay"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

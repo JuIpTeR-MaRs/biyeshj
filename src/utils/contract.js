@@ -1,7 +1,9 @@
 import { ethers } from "ethers";
+import { getRpcUrl } from "./api";
 
 export const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
-export const RPC_URL = "http://127.0.0.1:8545";
+export const RPC_URL = getRpcUrl();
+export const getProvider = () => new ethers.JsonRpcProvider(getRpcUrl());
 
 export const CONTRACT_ABI = [
   "function wardToGuardian(address) view returns (address)",
@@ -71,7 +73,7 @@ const wrapContractWithZeroGas = (contract) => {
 };
 
 export const getContract = async (specifiedPrivateKey = null) => {
-  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const provider = getProvider();
   
   // 优先使用传入的私钥，其次尝试从本地存储获取
   const privateKey = specifiedPrivateKey || (() => {
@@ -95,7 +97,7 @@ export const getContract = async (specifiedPrivateKey = null) => {
  */
 export const fundAccount = async (targetAddress) => {
   try {
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const provider = getProvider();
     const balance = await provider.getBalance(targetAddress);
     
     // 如果余额小于 1 ETH，充值 10 ETH

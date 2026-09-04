@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { contractService } from '../services/contractService';
 import { DEFAULT_THRESHOLD } from '../constants';
+import { getAllLocalAccounts } from '../utils/bankAccount';
 
 export const useBlockchainTransactions = () => {
   const [transactions, setTransactions] = useState([]);
@@ -52,7 +53,7 @@ export const useBlockchainTransactions = () => {
         if (currentUser.role === 'ward') {
           txIds = await contract.getWardTransactionIds(currentUser.address).catch(() => []);
         } else if (currentUser.role === 'guardian') {
-          const allAccounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
+          const allAccounts = getAllLocalAccounts();
           const wardCheckPromises = allAccounts.map(async (accInfo) => {
             try {
               const isG = await contract.isWardGuardian(accInfo.address, currentUser.address);

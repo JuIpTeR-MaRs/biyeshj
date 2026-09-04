@@ -6,6 +6,17 @@ require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 const app = express();
 app.use(express.json());
 
+// 跨域支持 (允许 Android 模拟器/真机 WebView 发起请求)
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(200);
+    }
+    next();
+});
+
 const PORT = process.env.PORT || 3000;
 
 // 1. 本地银行支付接口 (包装了区块链交易)

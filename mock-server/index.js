@@ -75,6 +75,86 @@ app.get("/api/contract/info", (req, res) => {
     });
 });
 
+// 2.8 获取指定账户的监护关系与阈值状态 (从 MySQL 双重记账直接读取，作为区块链网络的强力兜底与移动端加速)
+app.get("/api/guardian/status/:address", async (req, res) => {
+    const { address } = req.params;
+    if (!address) {
+        return res.status(400).json({ success: false, error: "Missing address" });
+    }
+    try {
+        const [asWard] = await paymentService.dbPool.execute(
+            "SELECT guardian_address FROM guardianship_bindings WHERE LOWER(ward_address) = LOWER(?)",
+            [address]
+        );
+        const [asGuardian] = await paymentService.dbPool.execute(
+            "SELECT ward_address FROM guardianship_bindings WHERE LOWER(guardian_address) = LOWER(?)",
+            [address]
+        );
+        const [thresholdRows] = await paymentService.dbPool.execute(
+            "SELECT threshold_amount FROM user_thresholds WHERE LOWER(ward_address) = LOWER(?)",
+            [address]
+        );
+        res.json({
+            success: true,
+            guardians: asWard.map(r => r.guardian_address),
+            wards: asGuardian.map(r => r.ward_address),
+            threshold: thresholdRows.length > 0 ? thresholdRows[0].threshold_amount.toString() : "0"
+        });
+    } catch (err) {
+        console.error("Query guardian status error:", err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 2.9 获取指定账户的相关历史消费交易 (从 MySQL 双重记账直接读取，作为移动端秒级加载与强力兜底)
+app.get("/api/transactions/:address", async (req, res) => {
+    const { address } = req.params;
+    if (!address) {
+        return res.status(400).json({ success: false, error: "Missing address" });
+    }
+    try {
+        // 1. 查询该地址是否作为监护人管辖了被监护人
+        const [asGuardian] = await paymentService.dbPool.execute(
+            "SELECT ward_address FROM guardianship_bindings WHERE LOWER(guardian_address) = LOWER(?)",
+            [address]
+        );
+        const wardAddresses = asGuardian.map(r => r.ward_address.toLowerCase());
+        const targetAddresses = Array.from(new Set([address.toLowerCase(), ...wardAddresses]));
+
+        // 构造动态 SQL IN 查询
+        const placeholders = targetAddresses.map(() => '?').join(',');
+        const [rows] = await paymentService.dbPool.execute(
+            `SELECT id, ward_address, amount, merchant_type, tx_hash, created_at, merchant_address, is_pending, is_approved, is_paid 
+             FROM transactions 
+             WHERE LOWER(ward_address) IN (${placeholders}) 
+             ORDER BY id DESC`,
+            targetAddresses
+        );
+
+        const transactions = rows.map(r => ({
+            id: r.id.toString(),
+            ward: r.ward_address,
+            amount: r.amount.toString(),
+            timestamp: r.created_at ? Math.floor(new Date(r.created_at).getTime() / 1000) : Math.floor(Date.now() / 1000),
+            merchantType: r.merchant_type || "日常消费",
+            isPending: Boolean(r.is_pending),
+            isApproved: Boolean(r.is_approved),
+            isPaid: Boolean(r.is_paid),
+            txHash: r.tx_hash || "",
+            merchantAddress: r.merchant_address || null
+        }));
+
+        res.json({
+            success: true,
+            transactions
+        });
+    } catch (err) {
+        console.error("Query transactions error:", err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+
 // 支付宝 SDK 初始化
 const { AlipaySdk } = require("alipay-sdk");
 const alipaySdk = new AlipaySdk({

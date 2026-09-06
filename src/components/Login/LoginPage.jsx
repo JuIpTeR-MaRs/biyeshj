@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Plus, User, ArrowRight, Banknote, Smartphone, Lock, Eye, EyeOff, Users, UserCheck } from 'lucide-react';
+import { Shield, Plus, User, ArrowRight, Banknote, Smartphone, Lock, Eye, EyeOff, Users, UserCheck, Settings, Globe } from 'lucide-react';
 import { 
   createLocalBankAccount, 
   getAllLocalAccounts, 
@@ -10,7 +10,7 @@ import {
 } from '../../utils/bankAccount';
 import { toast } from 'react-toastify';
 import { getContract, fundAccount } from '../../utils/contract';
-import { getApiUrl } from '../../utils/api';
+import { getApiUrl, getHostIp, isNative } from '../../utils/api';
 
 export const LoginPage = ({ onLogin }) => {
   const [accounts, setAccounts] = useState([]);
@@ -21,6 +21,18 @@ export const LoginPage = ({ onLogin }) => {
   const [guardianPhone, setGuardianPhone] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showIpModal, setShowIpModal] = useState(false);
+  const [customHostIp, setCustomHostIp] = useState(() => getHostIp());
+
+  const handleSaveIp = (ipToSave) => {
+    const target = ipToSave || customHostIp;
+    if (!target) return;
+    localStorage.setItem('SERVER_HOST_IP', target);
+    toast.success(`已切换服务通信 IP: ${target}，正在刷新...`);
+    setTimeout(() => {
+      window.location.reload();
+    }, 600);
+  };
 
   useEffect(() => {
     setAccounts(getAllLocalAccounts());
@@ -141,6 +153,61 @@ export const LoginPage = ({ onLogin }) => {
             <h1 className="text-2xl font-black bg-clip-text text-transparent bg-gradient-to-r from-slate-100 to-slate-300 tracking-tight text-center">智能监护银行</h1>
             <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">Smart Guardianship Banking</p>
           </div>
+
+          {/* Server Communication IP Settings Button & Modal */}
+          <div className="flex justify-between items-center bg-slate-950/40 border border-slate-800/60 rounded-xl px-3 py-1.5 mb-5">
+            <div className="flex items-center space-x-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="text-[10px] text-slate-400 font-mono">通信节点: {getHostIp()}</span>
+            </div>
+            <button 
+              type="button"
+              onClick={() => setShowIpModal(!showIpModal)} 
+              className="text-slate-400 hover:text-indigo-400 text-[10px] font-bold flex items-center space-x-1 transition-colors px-2 py-0.5 rounded hover:bg-slate-800/60"
+            >
+              <Settings className="w-3 h-3" />
+              <span>切换IP</span>
+            </button>
+          </div>
+
+          {showIpModal && (
+            <div className="bg-slate-950/90 border border-indigo-500/30 rounded-2xl p-4 mb-6 space-y-3 animate-in fade-in zoom-in-95 duration-200 shadow-xl">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200">配置后台通信 IP</span>
+                <span className="text-[10px] text-slate-400">真机请填局域网 IP</span>
+              </div>
+              <input 
+                type="text" 
+                placeholder="例如: 10.0.2.2 或 192.168.x.x" 
+                value={customHostIp} 
+                onChange={(e) => setCustomHostIp(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-slate-100 outline-none focus:border-indigo-500 font-mono"
+              />
+              <div className="flex space-x-2">
+                <button 
+                  type="button" 
+                  onClick={() => handleSaveIp("10.0.2.2")}
+                  className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded-lg transition"
+                >
+                  模拟器 (10.0.2.2)
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => handleSaveIp("127.0.0.1")}
+                  className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded-lg transition"
+                >
+                  本机 (127.0.0.1)
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => handleSaveIp()}
+                  className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold rounded-lg transition"
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Mode Tabs */}
           <div className="flex bg-slate-950/60 border border-slate-800/50 p-1 rounded-2xl mb-8">

@@ -140,22 +140,112 @@ function App() {
       setRole('merchant');
       return;
     }
+
+    const allAccounts = getAllLocalAccounts();
+    const zeroAddr = "0x0000000000000000000000000000000000000000";
+    let initialWards = [];
+
+    // 0. 双轨保障第一层：优先从后端 API / MySQL (双重记账) 快速读取监护状态与历史消费数据
+    // 确保即使移动端 Android WebView 链上 RPC 延迟或同步中，也能秒级呈现所有历史记录
     try {
-      // 自动充值 Gas 费
+      const statusUrl = getApiUrl(`/api/guardian/status/${account}`);
+      if (statusUrl) {
+        const statusRes = await fetch(statusUrl, { signal: AbortSignal.timeout ? AbortSignal.timeout(2500) : undefined });
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          if (statusData.success) {
+            // 被监护人视角：绑定的监护人列表
+            if (statusData.guardians && statusData.guardians.length > 0) {
+              const list = statusData.guardians.map(gAddr => {
+                const info = allAccounts.find(a => a.address.toLowerCase() === gAddr.toLowerCase());
+                return info || { address: gAddr, accountName: "已绑定监护人" };
+              });
+              setGuardianInfos(list);
+              setGuardianInfo(list[0] || null);
+            }
+
+            // 监护人视角：其名下的被监护人列表
+            if (statusData.wards && statusData.wards.length > 0) {
+              initialWards = statusData.wards.map(wAddr => {
+                const info = allAccounts.find(a => a.address.toLowerCase() === wAddr.toLowerCase());
+                return info || { address: wAddr, accountName: `被监护人 (${wAddr.slice(0, 6)}...)`, threshold: "800", isFrozen: false };
+              });
+              setActiveWards(initialWards);
+              setRole('guardian');
+            }
+
+            if (statusData.threshold) {
+              setMyThreshold(statusData.threshold.toString());
+            }
+          }
+        }
+      }
+
+      // 0.2 双轨消费数据秒级极速读取 (从 MySQL 数据库直接读取 50+ 笔真实消费历史并填充)
+      const txUrl = getApiUrl(`/api/transactions/${account}`);
+      if (txUrl) {
+        const txRes = await fetch(txUrl, { signal: AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined });
+        if (txRes.ok) {
+          const txData = await txRes.json();
+          if (txData.success && Array.isArray(txData.transactions) && txData.transactions.length > 0) {
+            const mappedDbTxs = txData.transactions.map(tx => {
+              if (tx.ward.toLowerCase() === account.toLowerCase()) {
+                return {
+                  ...tx,
+                  wardName: currentUser.role === 'guardian' ? "我 (监护人)" : "我"
+                };
+              }
+              const info = allAccounts.find(a => a.address.toLowerCase() === tx.ward.toLowerCase());
+              return {
+                ...tx,
+                wardName: info ? info.accountName : tx.ward
+              };
+            });
+            mappedDbTxs.sort((a, b) => b.timestamp - a.timestamp);
+            setHistoryTxs(mappedDbTxs);
+
+            // 如果存在待审批的交易且当前为监护人，做 pendingTxs 兜底
+            const dbPending = mappedDbTxs.filter(t => t.isPending);
+            if (dbPending.length > 0) {
+              setPendingTxs(dbPending);
+            }
+          }
+        }
+      }
+    } catch (apiErr) {
+      console.warn("Backend guardian/txs status fetch fallback:", apiErr.message);
+    }
+
+    // 1. 同步以太坊区块链智能合约数据 (各步骤独立 try/catch，防止某一步报错导致监护关系读取中断)
+    let contract = null;
+    try {
       await fundAccount(account);
-      
-      const contract = await getContract();
-      
-      // 1. 获取作为监护人的待处理审批交易
-      const ids = await contract.getPendingTransactions(account);
-      const txDetails = await Promise.all(ids.map(id => contract.transactions(id)));
+      contract = await getContract();
+    } catch (connErr) {
+      console.warn("Blockchain connection error:", connErr);
+    }
+
+    if (!contract) {
+      return;
+    }
+
+    let ids = [];
+    let txDetails = [];
+    // 1. 获取作为监护人的待处理审批交易
+    try {
+      ids = await contract.getPendingTransactions(account);
+      txDetails = await Promise.all(ids.map(id => contract.transactions(id)));
       setPendingTxs(txDetails.map(d => ({
         id: d[0], ward: d[1], amount: d[2].toString(), 
         timestamp: d[3], merchantType: d[4], isPending: d[5]
       })));
+    } catch (e) {
+      console.warn("Error fetching pending transactions:", e);
+    }
 
-      // 2. 获取作为监护人收到的绑定请求列表 (并行读取优化)
-      const allAccounts = getAllLocalAccounts();
+    // 2. 获取作为监护人收到的绑定请求列表 (并行读取优化)
+    let requests = [];
+    try {
       const pendingRequestPromises = allAccounts.map(async (accInfo) => {
         try {
           const pending = await contract.pendingWardToGuardian(accInfo.address);
@@ -166,17 +256,22 @@ function App() {
         return null;
       });
       const pendingRequestResults = await Promise.all(pendingRequestPromises);
-      const requests = pendingRequestResults.filter(r => r !== null);
+      requests = pendingRequestResults.filter(r => r !== null);
       setPendingRequests(requests);
+    } catch (e) {
+      console.warn("Error fetching pending requests:", e);
+    }
 
-      // 3. 获取我名下的被监护人列表 (作为监护人角色) (并行读取优化)
+    // 3. 获取我名下的被监护人列表 (作为监护人角色) (并行读取优化)
+    let wardsList = [...initialWards];
+    try {
       const wardCheckPromises = allAccounts.map(async (accInfo) => {
         try {
           const isG = await contract.isWardGuardian(accInfo.address, account);
           if (isG) {
             const [thres, frozen] = await Promise.all([
-              contract.threshold(accInfo.address),
-              contract.isFrozen(accInfo.address)
+              contract.threshold(accInfo.address).catch(() => "800"),
+              contract.isFrozen(accInfo.address).catch(() => false)
             ]);
             return { ...accInfo, threshold: thres.toString(), isFrozen: frozen };
           }
@@ -184,47 +279,47 @@ function App() {
         return null;
       });
       const wardCheckResults = await Promise.all(wardCheckPromises);
-      const wardsList = wardCheckResults.filter(w => w !== null);
-      setActiveWards(wardsList);
-
-      // 获取当前用户的阈值和冻结状态 (并行读取优化)
-      try {
-        const [myThres, frozen] = await Promise.all([
-          contract.threshold(account),
-          contract.isFrozen(account)
-        ]);
-        setMyThreshold(myThres.toString());
-        setIsAccountFrozen(frozen);
-      } catch (e) {}
-
-
-      // 4. 被监护人信息：查询当前用户的监护人和申请中的监护人 (并行读取优化)
-      let activeGuardians = [];
-      let reqGuardian = "0x0000000000000000000000000000000000000000";
-      try {
-        const [guardiansListRes, reqGuardianRes] = await Promise.all([
-          contract.getWardGuardians(account).catch(() => []),
-          contract.pendingWardToGuardian(account).catch(() => "0x0000000000000000000000000000000000000000")
-        ]);
-        activeGuardians = guardiansListRes;
-        reqGuardian = reqGuardianRes;
-      } catch (e) {
-        console.error("Query ward status error:", e);
+      const activeFromChain = wardCheckResults.filter(w => w !== null);
+      if (activeFromChain.length > 0) {
+        wardsList = activeFromChain;
+        setActiveWards(wardsList);
       }
+    } catch (e) {
+      console.warn("Error fetching active wards from contract:", e);
+    }
 
-      const zeroAddr = "0x0000000000000000000000000000000000000000";
-      
-      const guardianInfosList = [];
+    // 获取当前用户的阈值和冻结状态
+    try {
+      const [myThres, frozen] = await Promise.all([
+        contract.threshold(account),
+        contract.isFrozen(account)
+      ]);
+      setMyThreshold(myThres.toString());
+      setIsAccountFrozen(frozen);
+    } catch (e) {}
+
+    // 4. 被监护人信息：查询当前用户的监护人和申请中的监护人 (并行读取优化)
+    try {
+      const [guardiansListRes, reqGuardianRes] = await Promise.all([
+        contract.getWardGuardians(account).catch(() => []),
+        contract.pendingWardToGuardian(account).catch(() => zeroAddr)
+      ]);
+      const activeGuardians = guardiansListRes || [];
+      const reqGuardian = reqGuardianRes || zeroAddr;
+
       if (activeGuardians && activeGuardians.length > 0) {
+        const guardianInfosList = [];
         for (const gAddr of activeGuardians) {
           if (gAddr && gAddr !== zeroAddr) {
             const info = allAccounts.find(a => a.address.toLowerCase() === gAddr.toLowerCase());
             guardianInfosList.push(info || { address: gAddr, accountName: "已绑定监护人" });
           }
         }
+        if (guardianInfosList.length > 0) {
+          setGuardianInfos(guardianInfosList);
+          setGuardianInfo(guardianInfosList[0] || null);
+        }
       }
-      setGuardianInfos(guardianInfosList);
-      setGuardianInfo(guardianInfosList[0] || null);
 
       if (reqGuardian && reqGuardian !== zeroAddr) {
         const info = allAccounts.find(a => a.address.toLowerCase() === reqGuardian.toLowerCase());
@@ -232,76 +327,81 @@ function App() {
       } else {
         setPendingGuardianInfo(null);
       }
+    } catch (e) {
+      console.error("Query ward status error:", e);
+    }
 
-      // 5. 角色判定
-      let resolvedRole = 'ward';
-      if (currentUser.role === 'merchant') {
-        resolvedRole = 'merchant';
-      } else {
-        const hasWards = wardsList.length > 0;
-        const isGuardianOnChain = ids.length > 0 || txDetails.length > 0 || requests.length > 0 || hasWards;
-        const isGuardian = isGuardianOnChain || currentUser.role === 'guardian';
-        resolvedRole = isGuardian ? 'guardian' : 'ward';
-      }
-      setRole(resolvedRole);
+    // 5. 角色判定
+    let resolvedRole = 'ward';
+    if (currentUser.role === 'merchant') {
+      resolvedRole = 'merchant';
+    } else {
+      const hasWards = wardsList.length > 0;
+      const isGuardianOnChain = ids.length > 0 || txDetails.length > 0 || requests.length > 0 || hasWards;
+      const isGuardian = isGuardianOnChain || currentUser.role === 'guardian';
+      resolvedRole = isGuardian ? 'guardian' : 'ward';
+    }
+    setRole(resolvedRole);
 
-      // 6. 获取历史消费记录（按钱包地址并行索引优化）
+    // 6. 获取历史消费记录（链上实时同步与校验）
+    try {
       const currentRole = resolvedRole === 'guardian' ? 'guardian' : 'ward';
       let txIds = [];
-      try {
-        if (currentRole === 'ward') {
-          txIds = await contract.getWardTransactionIds(account);
-        } else {
-          const wardIdsPromises = wardsList.map(w => contract.getWardTransactionIds(w.address));
-          // 同时加载监护人自身的消费流水
-          wardIdsPromises.push(contract.getWardTransactionIds(account));
-          const wardIdsResults = await Promise.all(wardIdsPromises);
-          txIds = wardIdsResults.flat();
-        }
-      } catch (e) {
-        console.error("Error fetching ward transaction ids from contract:", e);
+      if (currentRole === 'ward') {
+        txIds = await contract.getWardTransactionIds(account).catch(() => []);
+      } else {
+        const targetWards = wardsList.length > 0 ? wardsList : initialWards;
+        const wardIdsPromises = targetWards.map(w => contract.getWardTransactionIds(w.address).catch(() => []));
+        wardIdsPromises.push(contract.getWardTransactionIds(account).catch(() => []));
+        const wardIdsResults = await Promise.all(wardIdsPromises);
+        txIds = wardIdsResults.flat();
       }
 
-      const promises = txIds.map(id =>
-        contract.transactions(id).catch(e => {
-          console.error("Error fetching transaction details for id:", id.toString(), e);
-          return null;
-        })
-      );
-      
-      const txResults = await Promise.all(promises);
-      const filteredTxs = txResults
-        .filter(tx => tx !== null)
-        .map(tx => ({
-          id: tx[0].toString(),
-          ward: tx[1],
-          amount: tx[2].toString(),
-          timestamp: Number(tx[3]),
-          merchantType: tx[4],
-          isPending: tx[5],
-          isApproved: tx[6],
-          isPaid: tx[7]
-        }));
+      if (txIds && txIds.length > 0) {
+        const uniqueTxIds = Array.from(new Set(txIds.map(id => id.toString())));
+        const promises = uniqueTxIds.map(id =>
+          contract.transactions(id).catch(e => {
+            console.error("Error fetching transaction details for id:", id.toString(), e);
+            return null;
+          })
+        );
+        
+        const txResults = await Promise.all(promises);
+        const filteredTxs = txResults
+          .filter(tx => tx !== null)
+          .map(tx => ({
+            id: tx[0].toString(),
+            ward: tx[1],
+            amount: tx[2].toString(),
+            timestamp: Number(tx[3]),
+            merchantType: tx[4],
+            isPending: tx[5],
+            isApproved: tx[6],
+            isPaid: tx[7]
+          }));
 
-      // 关联被监护人姓名
-      const mappedTxs = filteredTxs.map(tx => {
-        if (tx.ward.toLowerCase() === account.toLowerCase()) {
-          return {
-            ...tx,
-            wardName: "我 (监护人)"
-          };
+        if (filteredTxs.length > 0) {
+          // 关联被监护人姓名
+          const mappedTxs = filteredTxs.map(tx => {
+            if (tx.ward.toLowerCase() === account.toLowerCase()) {
+              return {
+                ...tx,
+                wardName: resolvedRole === 'ward' ? "我" : "我 (监护人)"
+              };
+            }
+            const info = allAccounts.find(a => a.address.toLowerCase() === tx.ward.toLowerCase());
+            return {
+              ...tx,
+              wardName: info ? info.accountName : tx.ward
+            };
+          });
+
+          mappedTxs.sort((a, b) => b.timestamp - a.timestamp);
+          setHistoryTxs(mappedTxs);
         }
-        const info = allAccounts.find(a => a.address.toLowerCase() === tx.ward.toLowerCase());
-        return {
-          ...tx,
-          wardName: info ? info.accountName : tx.ward
-        };
-      });
-
-      mappedTxs.sort((a, b) => b.timestamp - a.timestamp);
-      setHistoryTxs(mappedTxs);
-    } catch (err) {
-      console.error("Fetch Data Error:", err);
+      }
+    } catch (historyErr) {
+      console.warn("Error fetching history txs from contract:", historyErr);
     }
   }, [account]);
 

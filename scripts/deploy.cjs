@@ -77,6 +77,25 @@ async function main() {
         }
       }
 
+      // 确保默认演示账户的监护关系与阈值存在
+      const defaultWard = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+      const defaultGuardian = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
+      const isBound = await dapp.isWardGuardian(defaultWard, defaultGuardian);
+      if (!isBound) {
+        console.log("🔗 Pre-binding default demo relationship on-chain (Zhang San -> Li Si)...");
+        await (await dapp.bindGuardian(defaultWard, defaultGuardian)).wait();
+        await (await dapp.adminSetThreshold(defaultWard, 800)).wait();
+        await db.execute(
+          "INSERT INTO guardianship_bindings (ward_address, guardian_address) VALUES (?, ?) ON DUPLICATE KEY UPDATE ward_address = ward_address",
+          [defaultWard, defaultGuardian]
+        );
+        await db.execute(
+          "INSERT INTO user_thresholds (ward_address, threshold_amount) VALUES (?, ?) ON DUPLICATE KEY UPDATE threshold_amount = ?",
+          [defaultWard, 800, 800]
+        );
+        console.log("   ✅ Default demo relationship & threshold (800 Wei) ensured on chain & MySQL!");
+      }
+
       const [txRows] = await db.execute("SELECT * FROM transactions ORDER BY id ASC");
       if (txRows.length > 0) {
         console.log(`🔄 Recovering ${txRows.length} transactions from database...`);
@@ -121,6 +140,19 @@ async function main() {
     }
   } catch (dbError) {
     console.warn("⚠️ Could not recover bindings/thresholds/transactions from DB:", dbError.message);
+    try {
+      const defaultWard = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+      const defaultGuardian = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
+      const isBound = await dapp.isWardGuardian(defaultWard, defaultGuardian);
+      if (!isBound) {
+        console.log("🔗 Fallback: Pre-binding default demo relationship on-chain directly...");
+        await (await dapp.bindGuardian(defaultWard, defaultGuardian)).wait();
+        await (await dapp.adminSetThreshold(defaultWard, 800)).wait();
+        console.log("   ✅ Fallback: Default demo relationship & threshold (800 Wei) ensured on chain!");
+      }
+    } catch (fallbackErr) {
+      console.warn("⚠️ Fallback binding failed:", fallbackErr.message);
+    }
   }
 
   // Force clean exit to prevent libuv native assertion crash on Windows

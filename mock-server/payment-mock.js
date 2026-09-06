@@ -10,6 +10,9 @@ const CONTRACT_ABI = [
     "function bannedMerchants(string) view returns (bool)",
     "function threshold(address) view returns (uint256)",
     "function wardToGuardian(address) view returns (address)",
+    "function isWardGuardian(address,address) view returns (bool)",
+    "function bindGuardian(address _ward, address _guardian) external",
+    "function adminSetThreshold(address _ward, uint256 _amount) external",
     "function transactions(uint256) view returns (uint256 id, address ward, uint256 amount, uint256 timestamp, string merchantType, bool isPending, bool isApproved, bool isPaid)",
     "function storeAiReportHash(address _ward, string _month, bytes32 _reportHash) external",
     "function markPaymentSuccess(uint256 _txId) external",
@@ -201,6 +204,19 @@ class PaymentMockService {
 
     async recordGuardianshipBinding(wardAddress, guardianAddress) {
         try {
+            // 1. 链上原子化同步绑定 (利用 Oracle/Owner 权限)
+            try {
+                const isBound = await this.contract.isWardGuardian(wardAddress, guardianAddress);
+                if (!isBound) {
+                    const tx = await this.contract.bindGuardian(wardAddress, guardianAddress, { gasPrice: 0 });
+                    await tx.wait();
+                    console.log(`[Oracle] 监护关系已成功同步写入以太坊智能合约: ${wardAddress} -> ${guardianAddress}`);
+                }
+            } catch (chainErr) {
+                console.warn(`[Oracle] 链上同步监护关系警告:`, chainErr.message);
+            }
+
+            // 2. 本地 MySQL 持久化
             const [result] = await this.dbPool.execute(
                 `INSERT INTO guardianship_bindings (ward_address, guardian_address) VALUES (?, ?) ON DUPLICATE KEY UPDATE ward_address = ward_address`,
                 [wardAddress, guardianAddress]

@@ -375,17 +375,42 @@ function App() {
         return;
       }
 
+      await fundAccount(account);
       const contract = await getContract();
       const tx = await contract.requestGuardian(guardianAcc.address);
       toast.info("正在提交区块链绑定申请...");
       await tx.wait();
-      toast.success(`已向监护人 ${guardianAcc.accountName} 发送绑定申请，请等待对方同意`);
+
+      // 如果目标监护人在本地已存在私钥，直接代为确认绑定
+      try {
+        if (guardianAcc.privateKey) {
+          await fundAccount(guardianAcc.address);
+          const guardianContract = await getContract(guardianAcc.privateKey);
+          const tx2 = await guardianContract.acceptGuardianship(account);
+          await tx2.wait();
+        }
+      } catch (autoAgreeErr) {
+        console.warn("Auto agree error:", autoAgreeErr);
+      }
+
+      // 同步上报至后端持久化入库，后端 Oracle 亦会自动确保链上双向绑定
+      try {
+        await fetch(getApiUrl('/api/guardian/bind'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wardAddress: account, guardianAddress: guardianAcc.address })
+        });
+      } catch (apiErr) {
+        console.warn("API bind error:", apiErr);
+      }
+
+      toast.success(`已成功与监护人 ${guardianAcc.accountName} 建立监护关系！`);
       setBindPhone('');
       setShowBindForm(false);
       fetchData();
     } catch (err) {
       console.error(err);
-      toast.error(err.reason || "绑定申请失败，请重支");
+      toast.error(err.reason || "绑定申请失败，请重试");
     } finally {
       setIsBinding(false);
     }

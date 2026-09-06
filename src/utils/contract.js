@@ -1,7 +1,45 @@
 import { ethers } from "ethers";
-import { getRpcUrl } from "./api";
+import { getRpcUrl, getApiUrl } from "./api";
 
-export const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+export let CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+
+// 尝试从本地缓存读取之前后端同步过来的合约地址
+if (typeof window !== "undefined") {
+  const cachedAddr = localStorage.getItem("CACHED_CONTRACT_ADDRESS");
+  if (cachedAddr && cachedAddr.startsWith("0x")) {
+    CONTRACT_ADDRESS = cachedAddr;
+  }
+}
+
+/**
+ * 动态从后端获取最新部署的合约地址并同步
+ */
+export const syncLatestContractAddress = async () => {
+  try {
+    const url = getApiUrl('/api/contract/info');
+    if (!url) return CONTRACT_ADDRESS;
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.contractAddress && data.contractAddress.startsWith("0x")) {
+        CONTRACT_ADDRESS = data.contractAddress;
+        if (typeof window !== "undefined") {
+          localStorage.setItem("CACHED_CONTRACT_ADDRESS", CONTRACT_ADDRESS);
+        }
+        console.log("🔗 [Contract] Synced latest contract address from backend:", CONTRACT_ADDRESS);
+      }
+    }
+  } catch (e) {
+    // 后端可能未启动或网络超时，回退到默认静态地址
+  }
+  return CONTRACT_ADDRESS;
+};
+
+// 页面加载时自动静默尝试同步一次
+if (typeof window !== "undefined") {
+  syncLatestContractAddress();
+}
+
 export const RPC_URL = getRpcUrl();
 export const getProvider = () => new ethers.JsonRpcProvider(getRpcUrl());
 
@@ -75,11 +113,18 @@ const wrapContractWithZeroGas = (contract) => {
 export const getContract = async (specifiedPrivateKey = null) => {
   const provider = getProvider();
   
-  // 优先使用传入的私钥，其次尝试从本地存储获取
-  const privateKey = specifiedPrivateKey || (() => {
-    const userData = localStorage.getItem('bank_current_user');
-    return userData ? JSON.parse(userData).privateKey : null;
-  })();
+  // 优先使用传入的私钥，其次尝试从本地存储获取当前用户的私钥
+  let privateKey = specifiedPrivateKey;
+  if (!privateKey && typeof window !== 'undefined') {
+    try {
+      const userData = localStorage.getItem('bank_current_user');
+      if (userData) {
+        privateKey = JSON.parse(userData).privateKey || null;
+      }
+    } catch (e) {
+      // 忽略解析异常
+    }
+  }
 
   if (privateKey) {
     const wallet = new ethers.Wallet(privateKey, provider);

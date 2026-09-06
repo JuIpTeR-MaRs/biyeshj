@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Loader2, RefreshCw, AlertCircle, FileText } from 'lucide-react';
+import { Sparkles, Loader2, RefreshCw, AlertCircle, FileText, Copy, Check, Lightbulb, TrendingUp, AlertTriangle, ShieldCheck, BarChart3 } from 'lucide-react';
 import { getApiUrl } from '../../utils/api';
+import { toast } from 'react-toastify';
 
 export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
   const [analysis, setAnalysis] = useState('');
@@ -10,6 +11,7 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
   const [reportHash, setReportHash] = useState('');
   const [txHash, setTxHash] = useState('');
   const [verificationResult, setVerificationResult] = useState(null); // 'valid', 'invalid', 'not_found', 'loading', null
+  const [copied, setCopied] = useState(false);
 
   // Define color mapping classes based on role
   let accentText = "text-indigo-400";
@@ -78,6 +80,14 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
     const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return '0x' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const handleCopyReport = () => {
+    if (!analysis) return;
+    navigator.clipboard.writeText(analysis);
+    setCopied(true);
+    toast.success("AI 诊断报告已复制到剪贴板");
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleVerifyIntegrity = async () => {
@@ -152,78 +162,295 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
     }
   };
 
-  // 极简的 Markdown 渲染解析器
-  const renderMarkdown = (text) => {
+  // 处理行内加粗、行内代码与智能高亮
+  const parseInline = (text) => {
     if (!text) return null;
+    
+    // 拆分 **bold** 与 `code`
+    const regex = /(\*\*([^*]+)\*\*|`([^`]+)`)/g;
+    const tokens = [];
+    let lastIdx = 0;
+    let match;
 
-    return text.split('\n').map((line, idx) => {
-      let trimmed = line.trim();
-      
-      // 标题 3 (###)
-      if (trimmed.startsWith('###')) {
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        tokens.push({ type: 'text', content: text.substring(lastIdx, match.index) });
+      }
+      if (match[1].startsWith('**')) {
+        tokens.push({ type: 'bold', content: match[2] });
+      } else if (match[1].startsWith('`')) {
+        tokens.push({ type: 'code', content: match[3] });
+      }
+      lastIdx = regex.lastIndex;
+    }
+    if (lastIdx < text.length) {
+      tokens.push({ type: 'text', content: text.substring(lastIdx) });
+    }
+
+    return tokens.map((tok, idx) => {
+      if (tok.type === 'bold') {
+        const isRisk = /风险|异常|超支|违规|高危|警惕|黑名单|拦截/.test(tok.content);
+        const isSuccess = /建议|健康|安全|达标|合理|储蓄|优秀|鼓励|改善/.test(tok.content);
+        const isStat = /[\d.%元/]+/.test(tok.content) && tok.content.length <= 15;
+
+        if (isRisk) {
+          return (
+            <span key={idx} className="inline-flex items-center px-1.5 py-0.5 rounded-md text-xs font-black bg-rose-500/15 text-rose-300 border border-rose-500/30 mx-0.5">
+              {tok.content}
+            </span>
+          );
+        }
+        if (isSuccess) {
+          return (
+            <span key={idx} className="inline-flex items-center px-1.5 py-0.5 rounded-md text-xs font-black bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 mx-0.5">
+              {tok.content}
+            </span>
+          );
+        }
+        if (isStat) {
+          return (
+            <span key={idx} className={`font-mono font-bold ${accentTextLight} px-1 py-0.2 bg-slate-950/60 rounded border border-slate-800 mx-0.5`}>
+              {tok.content}
+            </span>
+          );
+        }
         return (
-          <h4 key={idx} className={`text-base font-extrabold mt-4 mb-2 flex items-center space-x-1.5 ${accentTextLight}`}>
-            <span className={`w-1.5 h-4 ${accentBg} rounded-full`}></span>
-            <span>{trimmed.replace(/^###\s*/, '')}</span>
-          </h4>
+          <strong key={idx} className={`font-black ${accentText} mx-0.5`}>
+            {tok.content}
+          </strong>
         );
       }
-
-      // 标题 2 (##)
-      if (trimmed.startsWith('##')) {
+      if (tok.type === 'code') {
         return (
-          <h3 key={idx} className={`text-lg font-black mt-5 mb-3 border-b pb-1 ${accentTextLight} border-slate-800/80`}>
-            {trimmed.replace(/^##\s*/, '')}
-          </h3>
+          <code key={idx} className="font-mono text-xs px-1.5 py-0.5 bg-slate-950 border border-slate-800 rounded text-amber-300 mx-0.5">
+            {tok.content}
+          </code>
         );
       }
-
-      // 无序列表项目 (- or *)
-      if (trimmed.startsWith('-') || trimmed.startsWith('*')) {
-        const content = trimmed.replace(/^[-*]\s*/, '');
-        return (
-          <li key={idx} className="ml-4 list-disc pl-1 py-0.5 leading-relaxed text-sm text-slate-300">
-            {parseBold(content)}
-          </li>
-        );
-      }
-
-      // 有序列表项目 (e.g. 1.)
-      if (/^\d+\.\s+/.test(trimmed)) {
-        const content = trimmed.replace(/^\d+\.\s+/, '');
-        const match = trimmed.match(/^(\d+)\.\s+/);
-        return (
-          <div key={idx} className="flex items-start space-x-2 my-1 leading-relaxed text-sm text-slate-300">
-            <span className={`font-black text-xs px-1.5 py-0.5 rounded ${accentBgLight} ${accentTextLight} border ${accentBorder}`}>{match[1]}</span>
-            <span className="flex-1">{parseBold(content)}</span>
-          </div>
-        );
-      }
-
-      // 空白行
-      if (trimmed === '') {
-        return <div key={idx} className="h-2"></div>;
-      }
-
-      // 普通段落
-      return (
-        <p key={idx} className="leading-relaxed text-sm my-1.5 text-slate-300">
-          {parseBold(trimmed)}
-        </p>
-      );
+      return <span key={idx}>{tok.content}</span>;
     });
   };
 
-  // 处理加粗的辅助函数 **text**
-  const parseBold = (text) => {
-    const parts = text.split(/\*\*([^*]+)\*\*/g);
-    return parts.map((part, index) => {
-      // 奇数索引是加粗内容
-      if (index % 2 === 1) {
-        return <strong key={index} className={`font-extrabold ${accentText} mx-0.5`}>{part}</strong>;
+  // 将纯 Markdown 文本解析为结构化的板块卡片数据
+  const parseMarkdownSections = (rawText) => {
+    if (!rawText) return [];
+    const lines = rawText.split('\n');
+    const sections = [];
+    let currentSection = { title: null, items: [] };
+
+    const finalizeSection = () => {
+      if (currentSection.title || currentSection.items.length > 0) {
+        sections.push(currentSection);
       }
-      return part;
-    });
+    };
+
+    let i = 0;
+    while (i < lines.length) {
+      let line = lines[i];
+      let trimmed = line.trim();
+
+      if (!trimmed) {
+        i++;
+        continue;
+      }
+
+      // 二级标题作为独立卡片划分
+      if (trimmed.startsWith('## ') || trimmed.startsWith('##')) {
+        finalizeSection();
+        currentSection = {
+          title: trimmed.replace(/^##\s*/, ''),
+          items: []
+        };
+        i++;
+        continue;
+      }
+
+      // 探测 Markdown 表格
+      if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+        const tableLines = [];
+        while (i < lines.length && lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+          tableLines.push(lines[i].trim());
+          i++;
+        }
+        if (tableLines.length >= 2) {
+          const headers = tableLines[0].split('|').map(s => s.trim()).filter(Boolean);
+          const bodyLines = tableLines.slice(1).filter(l => !/^\|(\s*:?-+:?\s*\|)+$/.test(l));
+          const rows = bodyLines.map(rowLine => 
+            rowLine.split('|').map(s => s.trim()).filter(Boolean)
+          );
+          currentSection.items.push({ type: 'table', headers, rows });
+          continue;
+        } else {
+          currentSection.items.push({ type: 'p', text: trimmed });
+          continue;
+        }
+      }
+
+      // 引用块 >
+      if (trimmed.startsWith('>')) {
+        const quoteLines = [];
+        while (i < lines.length && lines[i].trim().startsWith('>')) {
+          quoteLines.push(lines[i].trim().replace(/^>\s*/, ''));
+          i++;
+        }
+        currentSection.items.push({ type: 'quote', text: quoteLines.join(' ') });
+        continue;
+      }
+
+      // 三级标题
+      if (trimmed.startsWith('### ') || trimmed.startsWith('###')) {
+        currentSection.items.push({ type: 'h3', text: trimmed.replace(/^###\s*/, '') });
+        i++;
+        continue;
+      }
+
+      // 列表项 (- 或 * 或 1.)
+      if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || /^\d+\.\s+/.test(trimmed)) {
+        const isNumbered = /^\d+\.\s+/.test(trimmed);
+        const numberMatch = trimmed.match(/^(\d+)\.\s+/);
+        const cleanContent = isNumbered 
+          ? trimmed.replace(/^\d+\.\s+/, '') 
+          : trimmed.replace(/^[-*]\s*/, '');
+
+        currentSection.items.push({
+          type: 'list_item',
+          isNumbered,
+          number: numberMatch ? numberMatch[1] : null,
+          content: cleanContent
+        });
+        i++;
+        continue;
+      }
+
+      // 普通段落
+      currentSection.items.push({ type: 'p', text: trimmed });
+      i++;
+    }
+
+    finalizeSection();
+    return sections;
+  };
+
+  // 高颜值渲染整个 Markdown 卡片群
+  const renderRichMarkdown = (text) => {
+    const sections = parseMarkdownSections(text);
+    if (sections.length === 0) return null;
+
+    return (
+      <div className="space-y-4 text-left">
+        {sections.map((section, sIdx) => {
+          // 根据标题智能匹配专属图标
+          let SectionIcon = BarChart3;
+          const tLower = (section.title || '').toLowerCase();
+          if (tLower.includes('支出') || tLower.includes('概况') || tLower.includes('规模')) SectionIcon = TrendingUp;
+          else if (tLower.includes('风险') || tLower.includes('异常') || tLower.includes('预警')) SectionIcon = AlertTriangle;
+          else if (tLower.includes('建议') || tLower.includes('规划') || tLower.includes('措施')) SectionIcon = Lightbulb;
+          else if (tLower.includes('评级') || tLower.includes('审计') || tLower.includes('安全')) SectionIcon = ShieldCheck;
+
+          return (
+            <div 
+              key={sIdx}
+              className="bg-slate-950/50 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4.5 sm:p-5 shadow-xl transition-all duration-300 hover:border-slate-700/80"
+            >
+              {/* 板块头部标题 */}
+              {section.title && (
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800/80">
+                  <div className="flex items-center space-x-2.5">
+                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-black ${accentBgLight} ${accentText} border ${accentBorder}`}>
+                      {String(sIdx + 1).padStart(2, '0')}
+                    </span>
+                    <h3 className="text-sm sm:text-base font-black tracking-tight text-white flex items-center gap-1.5">
+                      <SectionIcon className={`w-4 h-4 ${accentText}`} />
+                      <span>{section.title}</span>
+                    </h3>
+                  </div>
+                </div>
+              )}
+
+              {/* 板块内部元素 */}
+              <div className="space-y-2.5">
+                {section.items.map((item, iIdx) => {
+                  if (item.type === 'h3') {
+                    return (
+                      <h4 key={iIdx} className={`text-xs sm:text-sm font-extrabold mt-3.5 mb-1.5 flex items-center gap-1.5 ${accentTextLight}`}>
+                        <span className={`w-1 h-3 rounded-full ${accentBg}`}></span>
+                        <span>{item.text}</span>
+                      </h4>
+                    );
+                  }
+
+                  if (item.type === 'table') {
+                    return (
+                      <div key={iIdx} className="overflow-x-auto my-3 rounded-xl border border-slate-800 bg-slate-900/50">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-900/90 text-slate-300 font-bold border-b border-slate-800">
+                            <tr>
+                              {item.headers.map((h, hIdx) => (
+                                <th key={hIdx} className="px-3.5 py-2.5 font-black tracking-wider whitespace-nowrap">
+                                  {parseInline(h)}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/60">
+                            {item.rows.map((row, rIdx) => (
+                              <tr key={rIdx} className="hover:bg-slate-850/40 transition-colors">
+                                {row.map((cell, cIdx) => (
+                                  <td key={cIdx} className="px-3.5 py-2 text-slate-300 whitespace-nowrap">
+                                    {parseInline(cell)}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  }
+
+                  if (item.type === 'quote') {
+                    return (
+                      <div 
+                        key={iIdx}
+                        className={`p-3.5 rounded-xl my-2.5 border-l-4 bg-slate-900/70 border-l-${accentText} border-y border-r border-slate-800/60 flex items-start space-x-2.5 shadow-inner`}
+                      >
+                        <Lightbulb className={`w-4 h-4 flex-shrink-0 mt-0.5 ${accentText}`} />
+                        <div className="text-xs leading-relaxed text-slate-300">
+                          {parseInline(item.text)}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (item.type === 'list_item') {
+                    return (
+                      <div key={iIdx} className="flex items-start space-x-2.5 py-0.5 text-xs leading-relaxed text-slate-300">
+                        {item.isNumbered ? (
+                          <span className={`flex-shrink-0 w-4 h-4 rounded-full text-[10px] font-black flex items-center justify-center ${accentBgLight} ${accentText} border ${accentBorder} mt-0.5`}>
+                            {item.number}
+                          </span>
+                        ) : (
+                          <span className={`w-1.5 h-1.5 rounded-full ${accentBg} flex-shrink-0 mt-2`}></span>
+                        )}
+                        <div className="flex-1">
+                          {parseInline(item.content)}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <p key={iIdx} className="text-xs sm:text-[13px] leading-relaxed text-slate-300/90 my-1">
+                      {parseInline(item.text)}
+                    </p>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   return (
@@ -249,13 +476,23 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
         </div>
 
         {analysis && !loading && (
-          <button 
-            onClick={handleTriggerAnalysis}
-            className={`p-2 rounded-xl border border-slate-800 flex items-center space-x-1.5 transition-all text-xs font-bold bg-slate-950/40 hover:bg-slate-900/60 ${accentText} active:scale-95`}
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>重新诊断</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <button 
+              onClick={handleCopyReport}
+              className={`px-3 py-1.5 rounded-xl border border-slate-800 flex items-center space-x-1.5 transition-all text-xs font-bold bg-slate-950/40 hover:bg-slate-900/60 ${accentText} active:scale-95`}
+              title="复制报告全文"
+            >
+              {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copied ? '已复制' : '复制全文'}</span>
+            </button>
+            <button 
+              onClick={handleTriggerAnalysis}
+              className={`px-3 py-1.5 rounded-xl border border-slate-800 flex items-center space-x-1.5 transition-all text-xs font-bold bg-slate-950/40 hover:bg-slate-900/60 ${accentText} active:scale-95`}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>重新诊断</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -291,11 +528,9 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
             </button>
           </div>
         ) : analysis ? (
-          /* 分析结果展示 */
-          <div className="max-h-[380px] overflow-y-auto pr-1.5 custom-scrollbar text-left animate-in slide-in-from-bottom-2 duration-500 text-slate-300">
-            <div className="space-y-1">
-              {renderMarkdown(analysis)}
-            </div>
+          /* 分析结果展示 - 高颜值卡片流 */
+          <div className="max-h-[500px] overflow-y-auto pr-1.5 custom-scrollbar text-left animate-in slide-in-from-bottom-2 duration-500 text-slate-300">
+            {renderRichMarkdown(analysis)}
           </div>
         ) : (
           /* 初始状态 */

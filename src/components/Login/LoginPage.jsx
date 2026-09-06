@@ -10,6 +10,7 @@ import {
 } from '../../utils/bankAccount';
 import { toast } from 'react-toastify';
 import { getContract, fundAccount } from '../../utils/contract';
+import { getApiUrl } from '../../utils/api';
 
 export const LoginPage = ({ onLogin }) => {
   const [accounts, setAccounts] = useState([]);
@@ -84,7 +85,25 @@ export const LoginPage = ({ onLogin }) => {
           const tx = await contract.requestGuardian(guardianAcc.address);
           toast.info("正在提交区块链绑定请求...");
           await tx.wait();
-          toast.success(`已向监护人 ${guardianPhone} 发送绑定请求，请等待对方同意`);
+
+          if (guardianAcc.privateKey) {
+            try {
+              await fundAccount(guardianAcc.address);
+              const guardianContract = await getContract(guardianAcc.privateKey);
+              const tx2 = await guardianContract.acceptGuardianship(newAccount.address);
+              await tx2.wait();
+            } catch (autoErr) {}
+          }
+
+          try {
+            await fetch(getApiUrl('/api/guardian/bind'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ wardAddress: newAccount.address, guardianAddress: guardianAcc.address })
+            });
+          } catch (apiErr) {}
+
+          toast.success(`已与监护人 ${guardianPhone} 成功建立监护关系！`);
         } catch (chainErr) {
           console.error("Chain Error:", chainErr);
           toast.error("区块链绑定请求失败，请检查网络");

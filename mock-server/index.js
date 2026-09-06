@@ -67,6 +67,14 @@ app.post("/api/guardian/threshold", async (req, res) => {
     res.status(result.success ? 200 : 500).json(result);
 });
 
+// 2.7 获取最新合约地址与网络配置接口
+app.get("/api/contract/info", (req, res) => {
+    res.json({
+        success: true,
+        contractAddress: process.env.CONTRACT_ADDRESS || "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+    });
+});
+
 // 支付宝 SDK 初始化
 const { AlipaySdk } = require("alipay-sdk");
 const alipaySdk = new AlipaySdk({

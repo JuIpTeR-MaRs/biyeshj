@@ -1,12 +1,24 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import {
   calculateTotalSpent,
   checkOverThreshold,
   formatBlockchainBlock,
-  formatContractTransaction
+  formatContractTransaction,
+  useBlockchainTransactions
 } from '../hooks/useBlockchainTransactions';
+import { contractService } from '../services/contractService';
 
-describe('src/hooks/useBlockchainTransactions.js - 纯函数单元测试 (Mock 数据隔离)', () => {
+// Mock contractService 避免真实连接外部以太坊/Hardhat 节点
+vi.mock('../services/contractService', () => ({
+  contractService: {
+    getBlockNumber: vi.fn(),
+    getBlock: vi.fn(),
+    getContractInstance: vi.fn()
+  }
+}));
+
+describe('src/hooks/useBlockchainTransactions.js - 单元测试 (Mock 隔离外部以太坊节点)', () => {
   describe('1. calculateTotalSpent 消费总计计算 (纯函数)', () => {
     it('正确累加多笔已解包的消费交易金额，并保留两位小数', () => {
       // 模拟多笔解包后的 Mock 交易数据
@@ -118,6 +130,198 @@ describe('src/hooks/useBlockchainTransactions.js - 纯函数单元测试 (Mock �
     it('当原始元组为空或无效时，应安全返回 null', () => {
       expect(formatContractTransaction(null)).toBeNull();
       expect(formatContractTransaction([])).toBeNull();
+    });
+  });
+
+  // =========================================================================
+  // 5. useBlockchainTransactions Hook 生命周期与交易加载/出块切换验证
+  // =========================================================================
+  describe('5. useBlockchainTransactions Hook (加载状态与交易成功切换)', () => {
+    const mockWardUser = {
+      username: 'ward_user',
+      address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+      role: 'ward',
+      privateKey: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d'
+    };
+
+    // 辅助函数：创建受控 Promise
+    const createDeferred = () => {
+      let resolve, reject;
+      const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    };
+
+    beforeEach(() => {
+      vi.restoreAllMocks();
+      localStorage.setItem('bank_current_user', JSON.stringify(mockWardUser));
+    });
+
+    afterEach(() => {
+      localStorage.clear();
+      vi.useRealTimers();
+    });
+
+    it('初始挂载时进入 loading (isMining=true)，链上异步数据返回后切为 success (isMining=false) 并呈现交易数据', async () => {
+      const deferredBlockNumber = createDeferred();
+      contractService.getBlockNumber.mockReturnValue(deferredBlockNumber.promise);
+
+      const mockContract = {
+        getWardTransactionIds: vi.fn().mockResolvedValue([1]),
+        transactions: vi.fn().mockResolvedValue([
+          1n,
+          '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+          160n,
+          1718000000n,
+          '餐饮美食',
+          false,
+          true,
+          true
+        ])
+      };
+      contractService.getContractInstance.mockResolvedValue(mockContract);
+      contractService.getBlock.mockResolvedValue({
+        number: 5,
+        timestamp: 1718000000,
+        hash: '0xblockhash5',
+        parentHash: '0xblockhash4'
+      });
+
+      // 挂载 Hook
+      const { result, unmount } = renderHook(() => useBlockchainTransactions());
+
+      // 1. 验证正在拉取/打包链上数据时的 loading 状态
+      expect(result.current.isMining).toBe(true);
+      expect(result.current.transactions).toEqual([]);
+
+      // 2. 模拟以太坊节点响应出块数据
+      deferredBlockNumber.resolve(5);
+
+      // 3. 等待 Hook 完成状态更新并验证 isMining 切回 false (加载完成)
+      await waitFor(() => {
+        expect(result.current.isMining).toBe(false);
+      });
+
+      // 4. 验证交易列表及衍生统计数据成功呈现
+      expect(result.current.transactions).toHaveLength(1);
+      expect(result.current.transactions[0]).toEqual({
+        id: '1',
+        ward: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+        amount: 160,
+        timestamp: 1718000000000,
+        category: '餐饮美食',
+        isPending: false,
+        isApproved: true,
+        isPaid: true
+      });
+      expect(result.current.totalSpent).toBe('160.00');
+      expect(result.current.overThreshold).toBe(false);
+
+      unmount();
+    });
+
+    it('模拟发起一笔新交易并上链出块，验证加载状态重新触发、成功完成及超额预警触发', async () => {
+      let currentTxIds = [1];
+      const deferredSecondFetch = createDeferred();
+
+      // 初始第 1 笔交易
+      contractService.getBlockNumber
+        .mockResolvedValueOnce(1)
+        .mockImplementationOnce(() => deferredSecondFetch.promise);
+
+      contractService.getBlock.mockResolvedValue({
+        number: 1,
+        timestamp: 1718000000,
+        hash: '0xhash1',
+        parentHash: '0xhash0'
+      });
+
+      const mockContract = {
+        getWardTransactionIds: vi.fn().mockImplementation(async () => currentTxIds),
+        transactions: vi.fn().mockImplementation(async (id) => {
+          if (Number(id) === 1) {
+            return [
+              1n,
+              '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+              200n,
+              1718000000n,
+              '生活缴费',
+              false,
+              true,
+              true
+            ];
+          }
+          if (Number(id) === 2) {
+            return [
+              2n,
+              '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+              950n,
+              1718000200n,
+              '数码科技',
+              false,
+              true,
+              true
+            ];
+          }
+          return null;
+        })
+      };
+      contractService.getContractInstance.mockResolvedValue(mockContract);
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+
+      const { result, unmount } = renderHook(() => useBlockchainTransactions());
+
+      // 初始数据加载完成
+      await waitFor(() => {
+        expect(result.current.isMining).toBe(false);
+      });
+      expect(result.current.transactions).toHaveLength(1);
+      expect(result.current.totalSpent).toBe('200.00');
+      expect(result.current.overThreshold).toBe(false);
+
+      // 模拟发起第二笔 950 元交易并已写入合约
+      currentTxIds = [1, 2];
+
+      // 推进轮询时钟 (8000ms) 触发下一次 fetchBlockchainData
+      act(() => {
+        vi.advanceTimersByTime(8000);
+      });
+
+      // 验证重新进入 loading (isMining: true)
+      expect(result.current.isMining).toBe(true);
+
+      // 模拟第二笔交易打包出块完成
+      deferredSecondFetch.resolve(2);
+
+      // 验证加载状态切回 success (isMining: false)
+      await waitFor(() => {
+        expect(result.current.isMining).toBe(false);
+      });
+
+      // 验证交易更新成功，总消费 1150 超过默认阈值 1000
+      expect(result.current.transactions).toHaveLength(2);
+      expect(result.current.totalSpent).toBe('1150.00');
+      expect(result.current.overThreshold).toBe(true);
+
+      unmount();
+    });
+
+    it('当区块链 RPC 节点调用失败时，应在 finally 中重置 isMining 为 false，保证应用健壮性', async () => {
+      contractService.getBlockNumber.mockRejectedValue(new Error('RPC Provider Connection Refused'));
+
+      const { result, unmount } = renderHook(() => useBlockchainTransactions());
+
+      await waitFor(() => {
+        expect(result.current.isMining).toBe(false);
+      });
+
+      expect(result.current.transactions).toEqual([]);
+      expect(result.current.totalSpent).toBe('0.00');
+
+      unmount();
     });
   });
 });

@@ -18,6 +18,8 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     error InvalidAddress();
     /// @dev 被监护人试图自己做自己的监护人时抛出
     error CannotBeOwnGuardian();
+    /// @dev 重复申请绑定同一监护人或已被绑定时抛出
+    error AlreadyRequested();
     /// @dev 监护人操作时找不到对应的待处理申请时抛出
     error NoPendingRequestForYou();
     /// @dev 非绑定监护人执行越权操作时抛出
@@ -161,6 +163,7 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     function requestGuardian(address _guardian) external nonReentrant {
         if (_guardian == address(0)) revert InvalidAddress();
         if (msg.sender == _guardian) revert CannotBeOwnGuardian();
+        if (pendingWardToGuardian[msg.sender] == _guardian || isWardGuardian[msg.sender][_guardian]) revert AlreadyRequested();
         
         pendingWardToGuardian[msg.sender] = _guardian;
         emit GuardianshipRequested(msg.sender, _guardian);

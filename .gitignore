@@ -18,6 +18,8 @@ dist-ssr
 artifacts/
 cache/
 typechain-types/
+coverage/
+coverage.json
 
 # Electron
 dist_electron/

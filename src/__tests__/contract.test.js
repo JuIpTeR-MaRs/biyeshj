@@ -2,8 +2,46 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   wrapContractWithZeroGas,
   syncLatestContractAddress,
+  getContract,
+  getProvider,
+  CONTRACT_ADDRESS,
   CONTRACT_ABI
 } from '../utils/contract';
+
+// Mock ethers.js 模块，拦截 JsonRpcProvider, Wallet, Contract 调用
+const { mockJsonRpcProvider, mockWallet, mockContract } = vi.hoisted(() => {
+  const mockJsonRpcProvider = vi.fn(function (url) {
+    this.url = url;
+  });
+  const mockWallet = vi.fn(function (pk, provider) {
+    this.privateKey = pk;
+    this.provider = provider;
+  });
+  const mockContract = vi.fn(function (address, abi, runner) {
+    this.target = address;
+    this.address = address;
+    this.abi = abi;
+    this.runner = runner;
+    this.interface = {
+      getFunction: vi.fn()
+    };
+  });
+
+  return { mockJsonRpcProvider, mockWallet, mockContract };
+});
+
+vi.mock('ethers', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    ethers: {
+      ...actual.ethers,
+      JsonRpcProvider: mockJsonRpcProvider,
+      Wallet: mockWallet,
+      Contract: mockContract
+    }
+  };
+});
 
 // Mock api.js 模块，隔离原生网络探测与平台环境差异
 vi.mock('../utils/api', () => ({
@@ -165,6 +203,109 @@ describe('src/utils/contract.js - 单元测试 (Mock 隔离外部以太坊节点
       expect(abiString).toContain('event PaymentPendingApproval');
       expect(abiString).toContain('event PaymentAutoApproved');
       expect(abiString).toContain('event TransactionConfirmed');
+    });
+  });
+
+  // =========================================================================
+  // 4. getContract 与 getProvider 实例初始化测试 (vi.mock 深度拦截 ethers.js)
+  // =========================================================================
+  describe('4. getContract 实例初始化与 ethers.js 调用拦截 (vi.mock 深度拦截)', () => {
+    it('getProvider 应使用当前 RPC 地址正确实例化 ethers.JsonRpcProvider', () => {
+      const provider = getProvider();
+      expect(mockJsonRpcProvider).toHaveBeenCalledWith('http://127.0.0.1:8545');
+      expect(provider).toBeInstanceOf(mockJsonRpcProvider);
+    });
+
+    it('未提供私钥且无本地登录信息时，应使用 Provider 实例化只读合约并包装 ZeroGas 代理', async () => {
+      const mockLocalStorage = {
+        getItem: vi.fn(() => null),
+        setItem: vi.fn()
+      };
+      vi.stubGlobal('localStorage', mockLocalStorage);
+      vi.stubGlobal('window', { localStorage: mockLocalStorage });
+
+      const contract = await getContract();
+
+      // 验证未调用 Wallet
+      expect(mockWallet).not.toHaveBeenCalled();
+      // 验证 Contract 实例化时的参数：合约地址、ABI、Provider 实例
+      expect(mockContract).toHaveBeenCalledWith(
+        CONTRACT_ADDRESS,
+        CONTRACT_ABI,
+        expect.any(mockJsonRpcProvider)
+      );
+      // 验证返回的是包装后的合约对象（可访问 address 属性）
+      expect(contract.address).toBe(CONTRACT_ADDRESS);
+    });
+
+    it('显式传入 specifiedPrivateKey 时，应使用 Wallet 签名器实例化合约', async () => {
+      const customKey = '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+      const contract = await getContract(customKey);
+
+      expect(mockWallet).toHaveBeenCalledWith(customKey, expect.any(mockJsonRpcProvider));
+      expect(mockContract).toHaveBeenCalledWith(
+        CONTRACT_ADDRESS,
+        CONTRACT_ABI,
+        expect.any(mockWallet)
+      );
+      expect(contract.address).toBe(CONTRACT_ADDRESS);
+    });
+
+    it('未显式传入私钥但 localStorage 存储了当前用户私钥时，应自动读取并注入 Wallet 签名器', async () => {
+      const storedPrivateKey = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+      const mockUserData = JSON.stringify({
+        username: 'ward_user',
+        address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+        role: 'ward',
+        privateKey: storedPrivateKey
+      });
+
+      const mockLocalStorage = {
+        getItem: vi.fn((key) => (key === 'bank_current_user' ? mockUserData : null)),
+        setItem: vi.fn()
+      };
+      vi.stubGlobal('localStorage', mockLocalStorage);
+      vi.stubGlobal('window', { localStorage: mockLocalStorage });
+
+      const contract = await getContract();
+
+      expect(mockLocalStorage.getItem).toHaveBeenCalledWith('bank_current_user');
+      expect(mockWallet).toHaveBeenCalledWith(storedPrivateKey, expect.any(mockJsonRpcProvider));
+      expect(mockContract).toHaveBeenCalledWith(
+        CONTRACT_ADDRESS,
+        CONTRACT_ABI,
+        expect.any(mockWallet)
+      );
+      expect(contract.address).toBe(CONTRACT_ADDRESS);
+    });
+
+    it('初始化返回的合约实例应具备 wrapContractWithZeroGas 免 Gas 代理特性', async () => {
+      // 模拟底层 contract 实例的接口及方法
+      const mockSendMethod = vi.fn().mockResolvedValue({ hash: '0xhash' });
+      mockContract.mockImplementationOnce(function (address, abi, runner) {
+        this.address = address;
+        this.abi = abi;
+        this.runner = runner;
+        this.interface = {
+          getFunction: vi.fn((name) => {
+            if (name === 'requestGuardian') {
+              return { inputs: [{}], stateMutability: 'nonpayable' };
+            }
+            return null;
+          })
+        };
+        this.requestGuardian = mockSendMethod;
+      });
+
+      const contract = await getContract();
+      await contract.requestGuardian('0x70997970C51812dc3A010C7d01b50e0d17dc79C8');
+
+      // 验证自动拦截并注入了 { gasPrice: 0 }
+      expect(mockSendMethod).toHaveBeenCalledWith(
+        '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+        { gasPrice: 0 }
+      );
     });
   });
 });

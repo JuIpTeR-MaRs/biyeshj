@@ -1,4 +1,4 @@
-﻿import path from 'node:path';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -7,7 +7,7 @@ export const config = {
   // 1. 指定测试运行器与测试文件目录
   runner: 'local',
   specs: [
-    './test/e2e-android/**/*.spec.js'
+    './e2e-android/**/*.spec.js'
   ],
   maxInstances: 1,
 

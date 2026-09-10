@@ -95,14 +95,17 @@ DEEPSEEK_API_KEY=您的DeepSeek_API_KEY
    ```bash
    npm run seed
    ```
-5. **启动后台 API 服务器**:
+5. **启动后台 API 与前端调试服务**:
    ```bash
+   # 推荐：使用 concurrently 一键并发拉起后台 API 与前端 Vite 服务
+   npm run dev:all
+
+   # 或者分别手动启动：
    npm run mock:start
-   ```
-6. **启动桌面 UI 客户端**:
-   ```bash
    npm run dev
-   # 另开窗口拉起 Electron 客户端
+   ```
+6. **调起桌面 Electron 客户端**（可选）:
+   ```bash
    npm run app
    ```
 
@@ -172,43 +175,90 @@ npm run cap:sync
 
 ## 🧪 第六步：系统自动化测试指南
 
-系统构建了涵盖**PC 桌面端 E2E 测试、移动端 Android E2E 测试、前端单元测试及智能合约集成测试**的多层自动化测试防护网。
+系统构建了涵盖**全量串联测试、智能合约测试与覆盖率、前端单元测试与覆盖率、PC 桌面端 E2E 及移动端 Android E2E**的多层自动化测试防护网。
 
 ### 1. 测试指令概览
 
 | 测试类型 | 测试目标 | 执行命令 | 技术栈 |
 | :--- | :--- | :--- | :--- |
-| **PC 端 E2E 测试** | Electron 桌面应用启动、界面渲染与选项卡交互 | `npm run test:e2e:pc` | Playwright + Electron (`_electron`) |
-| **Android 端 E2E 测试** | Capacitor Android 容器启动、切入 WebView 渲染断言 | `npm run test:e2e:android` | WebdriverIO + Appium (UiAutomator2) |
+| **一键全量测试** | 依次串联执行智能合约测试与前端单元测试 | `npm run test` | Hardhat + Vitest |
+| **智能合约集成测试** | 权限流转、审批/拦截/冻结及防重复绑定回滚 | `npm run test:contract` | Hardhat + Ethers.js + loadFixture |
+| **智能合约测试覆盖率** | 统计 Solidity 智能合约语句、函数与分支覆盖率 | `npm run test:contract:cov` | Hardhat + solidity-coverage |
 | **前端单元测试** | React Hooks、本地银行账户逻辑与合约调用代理 | `npm run test:unit` | Vitest |
-| **智能合约集成测试** | 以太坊智能合约权限流转、消费审批与冻结逻辑 | `npm run test:contract` | Hardhat + Ethers.js |
+| **前端代码覆盖率** | 统计前端核心模块与工具函数的覆盖率报告 | `npm run test:unit:cov` | Vitest + @vitest/coverage-v8 |
+| **PC 端 E2E 测试** | 打包/源码应用自动加载、LoginPage 表单登录与 Dashboard 跳转断言 | `npm run test:e2e:pc` | Playwright + Electron (`_electron`) |
+| **Android 端 E2E 测试** | Capacitor Android 容器启动、切入 WebView 渲染断言 | `npm run test:e2e:android` | WebdriverIO + Appium (UiAutomator2) |
 
 ---
 
-### 2. PC 桌面端端到端测试 (Playwright + Electron)
+### 2. 单元测试、智能合约测试与代码覆盖率报告
 
-基于 Playwright 官方 `_electron` API，自动化调用本地编译的 Electron 二进制文件并进行端到端测试。
-
-- **快速运行测试**：
+- **一键运行核心测试 (串联)**：
   ```bash
-  npm run test:e2e:pc
+  npm run test
   ```
-  *(注：Playwright 内置了 `webServer` 探活机制，执行该命令会自动检查并在后台启动 Vite 服务，无需手动开启两个终端窗口。)*
+  *(注：该命令会自动依次执行 `npm run test:contract` 和 `npm run test:unit`，两项均通过方判定通过。)*
 
-- **可视化交互与调试模式 (推荐)**：
+- **智能合约测试与覆盖率**：
   ```bash
-  # 启动 Playwright UI 可视化面板，支持实时预览、单步断点与 DOM 快照检查
-  npx playwright test --ui
+  # 运行 44 项基于 loadFixture 快照的合约用例 (毫秒级响应)
+  npm run test:contract
 
-  # 查看最近一次的测试报告
-  npx playwright show-report
+  # 生成智能合约覆盖率统计报告 (Stmts 98.46%, Lines 98.91%)
+  npm run test:contract:cov
+  ```
+
+- **前端单元测试与覆盖率**：
+  ```bash
+  # 单次运行所有单元测试
+  npm run test:unit
+
+  # 监听模式运行
+  npm run test:unit:watch
+
+  # 基于 V8 引擎生成前端核心模块代码覆盖率报告
+  npm run test:unit:cov
   ```
 
 ---
 
-### 3. 移动 Android 端端到端测试 (WebdriverIO + Appium)
+### 3. PC 桌面端端到端测试 (Playwright + Electron)
 
-针对 Capacitor 生成的混合应用工程，自动化安装拉起 Android APK，并安全切入 WebView 进行 DOM 渲染与交互断言。
+基于 Playwright 官方实验性 `_electron` API，直连 Electron 主进程与 Chromium 渲染窗口，测试脚本位于 [test/e2e/login.spec.js](file:///d:/biyesheji/test/e2e/login.spec.js)。
+
+#### 核心特性与架构设计：
+1. **双模启动与智能回退**：
+   - 优先自动探测并拉起已编译打包的可执行文件（如 `release/win-unpacked/GuardianDApp.exe`，支持 Windows/macOS/Linux 跨平台路径计算）。
+   - 若本地尚未执行打包（或传入环境变量 `FORCE_SOURCE_ELECTRON=true`），脚本自动平滑回退至本地 `electron` 开发二进制并加载 `electron/main.cjs`。
+2. **异步平滑等待与断言**：
+   - 适配了 [LoginPage.jsx](file:///d:/biyesheji/src/components/Login/LoginPage.jsx) 中登录成功的 1000ms 延迟动画，基于 Playwright 智能显式轮询进行稳定断言，无偶发性 Flaky。
+3. **覆盖完整业务闭环**：
+   - **用例 1**：启动 Electron 窗口，验证页面标题与品牌标识（`智能监护银行` / `Smart Guardianship Banking`）。
+   - **用例 2**：定位账号输入框与密码框，输入账号密码（监护人李四：`13826193664` / `123`），点击“进入系统”，断言成功跳转至 `Blockchain Safety Dashboard` 页面，验证钱包保护状态与退出登录按钮。
+   - **用例 3**：管理员账号登录（`admin` / `admin123`），断言成功跳转至 `Blockchain Management Console` 超级管理员控制台。
+   - **用例 4**：快速切换标签页交互与本地已知账户一键登录验证。
+
+#### 执行测试命令：
+```bash
+# 1. 快速执行 E2E 自动化测试（自动探测打包应用或自动起 Vite 服务）
+npm run test:e2e:pc
+
+# 2. 强制使用源码开发模式执行（通过 electron/main.cjs 启动）
+# Windows PowerShell:
+$env:FORCE_SOURCE_ELECTRON="true"; npm run test:e2e:pc
+
+# 3. 启动 Playwright UI 可视化面板（支持实时单步断点与 DOM 快照调试）
+npx playwright test --ui
+
+# 4. 查看 HTML 测试报告
+npx playwright show-report
+```
+
+---
+
+### 4. 移动 Android 端端到端测试 (WebdriverIO + Appium)
+
+针对 Capacitor 生成的混合应用工程，自动化安装拉起 Android APK，并安全切入 WebView 进行 DOM 渲染与交互断言。测试脚本位于 [e2e-android/login.spec.js](file:///d:/biyesheji/e2e-android/login.spec.js)。
 
 #### 前置环境准备：
 1. **安装全局 Appium 2.x 与 Android 驱动**（首次使用需安装）：
@@ -232,21 +282,3 @@ npm run cap:sync
 npm run test:e2e:android
 ```
 *(注：[wdio.android.conf.js](file:///d:/biyesheji/wdio.android.conf.js) 中配置了 `'appium:chromedriverAutodownload': true`，执行测试时会自动下载并适配设备系统内置的 WebView 版本。)*
-
----
-
-### 4. 单元测试与智能合约集成测试
-
-- **前端单元测试**：
-  ```bash
-  # 单次运行
-  npm run test:unit
-
-  # 监听模式运行
-  npm run test:unit:watch
-  ```
-
-- **智能合约测试**：
-  ```bash
-  npm run test:contract
-  ```

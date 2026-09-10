@@ -38,3 +38,7 @@ release/
 scripts/alipay_keys/
 mock-server/env
 response.html
+
+# Playwright E2E
+test-results/
+playwright-report/

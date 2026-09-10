@@ -167,3 +167,86 @@ npm run cap:sync
 * **快捷命令**：在控制台运行 `npm run cap:android` 亦可自动调起 Android Studio 或已连接的手机调试设备进行真机运行。
 
 
+
+---
+
+## 🧪 第六步：系统自动化测试指南
+
+系统构建了涵盖**PC 桌面端 E2E 测试、移动端 Android E2E 测试、前端单元测试及智能合约集成测试**的多层自动化测试防护网。
+
+### 1. 测试指令概览
+
+| 测试类型 | 测试目标 | 执行命令 | 技术栈 |
+| :--- | :--- | :--- | :--- |
+| **PC 端 E2E 测试** | Electron 桌面应用启动、界面渲染与选项卡交互 | `npm run test:e2e:pc` | Playwright + Electron (`_electron`) |
+| **Android 端 E2E 测试** | Capacitor Android 容器启动、切入 WebView 渲染断言 | `npm run test:e2e:android` | WebdriverIO + Appium (UiAutomator2) |
+| **前端单元测试** | React Hooks、本地银行账户逻辑与合约调用代理 | `npm run test:unit` | Vitest |
+| **智能合约集成测试** | 以太坊智能合约权限流转、消费审批与冻结逻辑 | `npm run test:contract` | Hardhat + Ethers.js |
+
+---
+
+### 2. PC 桌面端端到端测试 (Playwright + Electron)
+
+基于 Playwright 官方 `_electron` API，自动化调用本地编译的 Electron 二进制文件并进行端到端测试。
+
+- **快速运行测试**：
+  ```bash
+  npm run test:e2e:pc
+  ```
+  *(注：Playwright 内置了 `webServer` 探活机制，执行该命令会自动检查并在后台启动 Vite 服务，无需手动开启两个终端窗口。)*
+
+- **可视化交互与调试模式 (推荐)**：
+  ```bash
+  # 启动 Playwright UI 可视化面板，支持实时预览、单步断点与 DOM 快照检查
+  npx playwright test --ui
+
+  # 查看最近一次的测试报告
+  npx playwright show-report
+  ```
+
+---
+
+### 3. 移动 Android 端端到端测试 (WebdriverIO + Appium)
+
+针对 Capacitor 生成的混合应用工程，自动化安装拉起 Android APK，并安全切入 WebView 进行 DOM 渲染与交互断言。
+
+#### 前置环境准备：
+1. **安装全局 Appium 2.x 与 Android 驱动**（首次使用需安装）：
+   ```bash
+   npm install -g appium
+   appium driver install uiautomator2
+   ```
+2. **连接设备或启动模拟器**：
+   ```bash
+   adb devices
+   ```
+   确保列表中出现可用在线设备。
+3. **确保已构建最新 Debug APK**：
+   ```bash
+   npm run cap:sync
+   cd android && ./gradlew assembleDebug && cd ..
+   ```
+
+#### 执行测试：
+```bash
+npm run test:e2e:android
+```
+*(注：[wdio.android.conf.js](file:///d:/biyesheji/wdio.android.conf.js) 中配置了 `'appium:chromedriverAutodownload': true`，执行测试时会自动下载并适配设备系统内置的 WebView 版本。)*
+
+---
+
+### 4. 单元测试与智能合约集成测试
+
+- **前端单元测试**：
+  ```bash
+  # 单次运行
+  npm run test:unit
+
+  # 监听模式运行
+  npm run test:unit:watch
+  ```
+
+- **智能合约测试**：
+  ```bash
+  npm run test:contract
+  ```

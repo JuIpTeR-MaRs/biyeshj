@@ -73,7 +73,7 @@ export const CONTRACT_ABI = [
 /**
  * 包装合约，使得所有的写交易自动携带 gasPrice: 0 从而实现免 Gas
  */
-const wrapContractWithZeroGas = (contract) => {
+export const wrapContractWithZeroGas = (contract) => {
   return new Proxy(contract, {
     get(target, prop, receiver) {
       const origMethod = target[prop];

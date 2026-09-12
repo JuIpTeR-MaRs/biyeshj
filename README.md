@@ -258,27 +258,42 @@ npx playwright show-report
 
 ### 4. 移动 Android 端端到端测试 (WebdriverIO + Appium)
 
-针对 Capacitor 生成的混合应用工程，自动化安装拉起 Android APK，并安全切入 WebView 进行 DOM 渲染与交互断言。测试脚本位于 [e2e-android/login.spec.js](file:///d:/biyesheji/e2e-android/login.spec.js)。
+针对 Capacitor 生成的混合移动应用 (Hybrid App)，通过 WebdriverIO 与 Appium 2.x 驱动，实现 Android APK 自动安装与拉起，并通过上下文切换（Context Switching）切入 Chromium WebView 进行 Web DOM 渲染与交互断言。测试脚本位于 [test/e2e/android.spec.js](file:///d:/biyesheji/test/e2e/android.spec.js)。
+
+#### 核心特性与架构设计：
+1. **环境自适应与 SDK 智能注入**：
+   - [wdio.android.conf.js](file:///d:/biyesheji/wdio.android.conf.js) 具备环境变量自探测机制。若当前系统尚未导出 `ANDROID_HOME` 或 `ANDROID_SDK_ROOT`，配置文件会自动探测本地 SDK 路径（如 `AppData/Local/Android/Sdk`）并动态将 `platform-tools` 与 `emulator` 注入进程 `PATH`，解决 Appium 初始化依赖报错。
+2. **模拟器自动唤起与就绪等待**：
+   - 能力配置中集成了 `'appium:avd': 'Resizable_Experimental'`。当执行测试时若未提前开启 Android 模拟器，Appium 将自动调用本地 AVD 镜像启动模拟器，并在设备完全进入在线就绪状态后无缝衔接安装执行。
+3. **混合应用上下文轮询切换 (Native ➔ WebView)**：
+   - 考虑到 Capacitor 启动时原生容器与 WebView 页面加载的时间差，测试脚本内置 `driver.waitUntil` 轮询探测机制，待 `WEBVIEW_com.guardiandapp.mobile` 出现后安全切入 Web 渲染环境，测试结束后平滑切回 `NATIVE_APP`。
+4. **ChromeDriver 自动版本适配**：
+   - 配置开启 `'appium:chromedriverAutodownload': true`，Appium 会根据设备内嵌的 WebView 真实版本自动匹配并下载对应的 ChromeDriver 二进制，无需人工维护驱动版本。
+5. **UI 元素与页面渲染断言**：
+   - 在 Web 渲染上下文中，定位前端 LoginPage 包含“登录”文本的按钮并执行 `waitForDisplayed` 等待渲染，随后完成可见性断言。
 
 #### 前置环境准备：
-1. **安装全局 Appium 2.x 与 Android 驱动**（首次使用需安装）：
+1. **安装开发依赖与 Appium 驱动**（项目已内置依赖，首次配置仅需安装驱动）：
    ```bash
-   npm install -g appium
-   appium driver install uiautomator2
+   # 安装项目 devDependencies (已包含 wdio 与 appium)
+   npm install
+
+   # 安装 Appium UiAutomator2 Android 驱动
+   npx appium driver install uiautomator2
    ```
-2. **连接设备或启动模拟器**：
+2. **连接设备或启动模拟器**（可选，未启动时脚本将自动唤起本地 AVD）：
    ```bash
    adb devices
    ```
-   确保列表中出现可用在线设备。
 3. **确保已构建最新 Debug APK**：
    ```bash
    npm run cap:sync
    cd android && ./gradlew assembleDebug && cd ..
    ```
 
-#### 执行测试：
+#### 执行测试命令：
 ```bash
+# 启动 Android 端 E2E 自动化测试
 npm run test:e2e:android
 ```
-*(注：[wdio.android.conf.js](file:///d:/biyesheji/wdio.android.conf.js) 中配置了 `'appium:chromedriverAutodownload': true`，执行测试时会自动下载并适配设备系统内置的 WebView 版本。)*
+

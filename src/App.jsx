@@ -13,8 +13,9 @@ import { AiAnalysisCard } from './components/AiAnalysis/AiAnalysisCard';
 import { MerchantDashboard } from './components/Merchant/MerchantDashboard';
 import { MessageCenter } from './components/MessageCenter';
 import { getContract, CONTRACT_ADDRESS, fundAccount } from './utils/contract';
-import { getLocalBankUser, getAllLocalAccounts } from './utils/bankAccount';
+import { getLocalBankUser, getAllLocalAccounts, logoutLocalBank } from './utils/bankAccount';
 import { getApiUrl } from './utils/api';
+import { authenticatedFetch, clearApiSession } from './utils/authenticatedFetch';
 
 // Global tracking to prevent duplicate notifications for the same order across component lifecycles or polling/postMessage races
 const notifiedTrades = new Set();
@@ -120,6 +121,8 @@ function App() {
   };
 
   const handleLogout = () => {
+    clearApiSession();
+    logoutLocalBank();
     setIsLoggedIn(false);
     setAccount(null);
     setGuardianInfo(null);
@@ -150,7 +153,7 @@ function App() {
     try {
       const statusUrl = getApiUrl(`/api/guardian/status/${account}`);
       if (statusUrl) {
-        const statusRes = await fetch(statusUrl, { signal: AbortSignal.timeout ? AbortSignal.timeout(2500) : undefined });
+        const statusRes = await authenticatedFetch(statusUrl, { signal: AbortSignal.timeout ? AbortSignal.timeout(2500) : undefined });
         if (statusRes.ok) {
           const statusData = await statusRes.json();
           if (statusData.success) {
@@ -184,7 +187,7 @@ function App() {
       // 0.2 双轨消费数据秒级极速读取 (从 MySQL 数据库直接读取 50+ 笔真实消费历史并填充)
       const txUrl = getApiUrl(`/api/transactions/${account}`);
       if (txUrl) {
-        const txRes = await fetch(txUrl, { signal: AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined });
+        const txRes = await authenticatedFetch(txUrl, { signal: AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined });
         if (txRes.ok) {
           const txData = await txRes.json();
           if (txData.success && Array.isArray(txData.transactions) && txData.transactions.length > 0) {
@@ -434,7 +437,7 @@ function App() {
 
       if (approve) {
         try {
-          await fetch(getApiUrl('/api/guardian/bind'), {
+          await authenticatedFetch('/api/guardian/bind', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ wardAddress, guardianAddress: account })
@@ -481,30 +484,7 @@ function App() {
       toast.info("正在提交区块链绑定申请...");
       await tx.wait();
 
-      // 如果目标监护人在本地已存在私钥，直接代为确认绑定
-      try {
-        if (guardianAcc.privateKey) {
-          await fundAccount(guardianAcc.address);
-          const guardianContract = await getContract(guardianAcc.privateKey);
-          const tx2 = await guardianContract.acceptGuardianship(account);
-          await tx2.wait();
-        }
-      } catch (autoAgreeErr) {
-        console.warn("Auto agree error:", autoAgreeErr);
-      }
-
-      // 同步上报至后端持久化入库，后端 Oracle 亦会自动确保链上双向绑定
-      try {
-        await fetch(getApiUrl('/api/guardian/bind'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ wardAddress: account, guardianAddress: guardianAcc.address })
-        });
-      } catch (apiErr) {
-        console.warn("API bind error:", apiErr);
-      }
-
-      toast.success(`已成功与监护人 ${guardianAcc.accountName} 建立监护关系！`);
+      toast.success(`已向监护人 ${guardianAcc.accountName} 发送绑定申请，等待对方确认。`);
       setBindPhone('');
       setShowBindForm(false);
       fetchData();
@@ -546,19 +526,13 @@ function App() {
         return;
       }
 
-      toast.info("第一步：代表被监护人向您发送绑定请求...");
-      await fundAccount(wardAcc.address);
-      const wardContract = await getContract(wardAcc.privateKey);
-      const tx1 = await wardContract.requestGuardian(account);
-      await tx1.wait();
-
-      toast.info("第二步：您同意并确认绑定该成员...");
+      toast.info("正在确认该成员已发送的绑定申请...");
       const guardianContract = await getContract();
       const tx2 = await guardianContract.acceptGuardianship(wardAcc.address);
       await tx2.wait();
 
       try {
-        await fetch(getApiUrl('/api/guardian/bind'), {
+        await authenticatedFetch('/api/guardian/bind', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ wardAddress: wardAcc.address, guardianAddress: account })
@@ -593,7 +567,7 @@ function App() {
       await tx.wait();
 
       try {
-        await fetch(getApiUrl('/api/guardian/threshold'), {
+        await authenticatedFetch('/api/guardian/threshold', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ wardAddress, amount: newThreshold })
@@ -666,7 +640,7 @@ function App() {
     }
     setIsScanPaying(true);
     try {
-      const response = await fetch(getApiUrl("/api/alipay/pay"), {
+      const response = await authenticatedFetch("/api/alipay/pay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -714,7 +688,7 @@ function App() {
     // 发送取消订单请求到后台，防止后台或兜底模式自动录入成功
     if (qrOutTradeNo) {
       try {
-        await fetch(getApiUrl("/api/alipay/cancel"), {
+        await authenticatedFetch("/api/alipay/cancel", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ outTradeNo: qrOutTradeNo })
@@ -730,7 +704,7 @@ function App() {
 
     pollIntervalRef.current = setInterval(async () => {
       try {
-        const response = await fetch(getApiUrl(`/api/alipay/query?outTradeNo=${outTradeNo}`));
+        const response = await authenticatedFetch(`/api/alipay/query?outTradeNo=${encodeURIComponent(outTradeNo)}`);
         const data = await response.json();
         if (data.success) {
           if (data.status === 'TRADE_SUCCESS') {
@@ -765,7 +739,7 @@ function App() {
       return false;
     }
     try {
-      const response = await fetch(getApiUrl("/api/alipay/pay"), {
+      const response = await authenticatedFetch("/api/alipay/pay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -851,7 +825,7 @@ function App() {
     payingTxIdRef.current = tx.id;
     setPayingTxId(tx.id);
     try {
-      const response = await fetch(getApiUrl("/api/alipay/pay"), {
+      const response = await authenticatedFetch("/api/alipay/pay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

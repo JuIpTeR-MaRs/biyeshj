@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { getRpcUrl, getApiUrl } from "./api";
+import { getActivePrivateKey } from "./bankAccount";
 
 export let CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
 
@@ -115,16 +116,7 @@ export const getContract = async (specifiedPrivateKey = null) => {
   
   // 优先使用传入的私钥，其次尝试从本地存储获取当前用户的私钥
   let privateKey = specifiedPrivateKey;
-  if (!privateKey && typeof window !== 'undefined') {
-    try {
-      const userData = localStorage.getItem('bank_current_user');
-      if (userData) {
-        privateKey = JSON.parse(userData).privateKey || null;
-      }
-    } catch (e) {
-      // 忽略解析异常
-    }
-  }
+  if (!privateKey) privateKey = getActivePrivateKey();
 
   if (privateKey) {
     const wallet = new ethers.Wallet(privateKey, provider);

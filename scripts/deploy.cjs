@@ -28,7 +28,8 @@ async function main() {
   if (fs.existsSync(envPath)) {
     const existingContent = fs.readFileSync(envPath, "utf8");
     const preservedLines = existingContent.split("\n").filter(line => 
-      line.trim().startsWith("ALIPAY_") || line.trim().startsWith("DB_") || line.trim().startsWith("DEEPSEEK_")
+      line.trim().startsWith("ALIPAY_") || line.trim().startsWith("DB_") || line.trim().startsWith("DEEPSEEK_") ||
+      line.trim().startsWith("ADMIN_PASSWORD=") || line.trim().startsWith("HOST=") || line.trim().startsWith("CORS_ORIGINS=")
     );
     if (preservedLines.length > 0) {
       preserveContent = "\n\n" + preservedLines.join("\n");

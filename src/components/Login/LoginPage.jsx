@@ -10,7 +10,8 @@ import {
 } from '../../utils/bankAccount';
 import { toast } from 'react-toastify';
 import { getContract, fundAccount } from '../../utils/contract';
-import { getApiUrl, getHostIp, isNative } from '../../utils/api';
+import { getHostIp, isNative } from '../../utils/api';
+import { loginAdminApi } from '../../utils/authenticatedFetch';
 
 export const LoginPage = ({ onLogin }) => {
   const [accounts, setAccounts] = useState([]);
@@ -38,7 +39,7 @@ export const LoginPage = ({ onLogin }) => {
     setAccounts(getAllLocalAccounts());
   }, []);
 
-  const handlePhoneLogin = (e) => {
+  const handlePhoneLogin = async (e) => {
     e.preventDefault();
     if (!phone || !password) {
       toast.error("请输入账号和密码");
@@ -46,8 +47,15 @@ export const LoginPage = ({ onLogin }) => {
     }
 
     setIsLoading(true);
-    setTimeout(() => {
-      if (phone === 'admin' && password === 'admin123') {
+    setTimeout(async () => {
+      if (phone === 'admin') {
+        try {
+          await loginAdminApi(password);
+        } catch (error) {
+          toast.error(error.message);
+          setIsLoading(false);
+          return;
+        }
         toast.success("管理员认证成功");
         onLogin({ role: 'admin', accountName: '超级管理员', address: 'admin' });
       } else {
@@ -98,24 +106,7 @@ export const LoginPage = ({ onLogin }) => {
           toast.info("正在提交区块链绑定请求...");
           await tx.wait();
 
-          if (guardianAcc.privateKey) {
-            try {
-              await fundAccount(guardianAcc.address);
-              const guardianContract = await getContract(guardianAcc.privateKey);
-              const tx2 = await guardianContract.acceptGuardianship(newAccount.address);
-              await tx2.wait();
-            } catch (autoErr) {}
-          }
-
-          try {
-            await fetch(getApiUrl('/api/guardian/bind'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ wardAddress: newAccount.address, guardianAddress: guardianAcc.address })
-            });
-          } catch (apiErr) {}
-
-          toast.success(`已与监护人 ${guardianPhone} 成功建立监护关系！`);
+          toast.success(`绑定申请已发送给监护人 ${guardianPhone}，等待对方登录确认。`);
         } catch (chainErr) {
           console.error("Chain Error:", chainErr);
           toast.error("区块链绑定请求失败，请检查网络");
@@ -134,8 +125,13 @@ export const LoginPage = ({ onLogin }) => {
   };
 
   const handleQuickLogin = (account) => {
-    registerToLocalBank(account);
-    onLogin(account);
+    const unlocked = verifyLogin(account.phone, "123");
+    if (!unlocked) {
+      toast.error("快捷账户解锁失败");
+      return;
+    }
+    registerToLocalBank(unlocked);
+    onLogin(unlocked);
   };
 
   return (

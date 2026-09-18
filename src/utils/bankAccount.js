@@ -1,5 +1,13 @@
 import { ethers } from 'ethers';
 
+let activeAccount = null;
+
+const toStoredAccount = (account) => {
+  const { privateKey, password, ...profile } = account;
+  if (privateKey && password && !profile.keystore) profile.keystore = new ethers.Wallet(privateKey).encryptSync(password);
+  return profile;
+};
+
 /**
  * 模拟银行账户生成器
  */
@@ -33,24 +41,30 @@ export const maskCardNumber = (cardNumber) => {
  */
 export const registerToLocalBank = (account) => {
   const accounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
-  const exists = accounts.find(a => a.address === account.address || (a.phone && a.phone === account.phone));
-  if (!exists) {
-    accounts.push(account);
-    localStorage.setItem('bank_all_accounts', JSON.stringify(accounts));
-  }
-  localStorage.setItem('bank_current_user', JSON.stringify(account));
+  const stored = toStoredAccount(account);
+  const index = accounts.findIndex(a => a.address === account.address || (a.phone && a.phone === account.phone));
+  if (index >= 0) accounts[index] = { ...accounts[index], ...stored };
+  else accounts.push(stored);
+  localStorage.setItem('bank_all_accounts', JSON.stringify(accounts));
+  localStorage.setItem('bank_current_user', JSON.stringify(stored));
+  activeAccount = { ...stored, ...(account.privateKey ? { privateKey: account.privateKey } : {}) };
 };
 
 export const verifyLogin = (phone, password) => {
   const accounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
-  // 查找匹配的手机号和密码
-  const user = accounts.find(a => a.phone === phone && a.password === password);
-  return user || null;
+  const stored = accounts.find(a => a.phone === phone);
+  if (!stored?.keystore) return null;
+  try {
+    const wallet = ethers.Wallet.fromEncryptedJsonSync(stored.keystore, password);
+    return wallet.address.toLowerCase() === stored.address.toLowerCase() ? { ...stored, privateKey: wallet.privateKey } : null;
+  } catch { return null; }
 };
 
 // 预置测试账户
 export const seedTestAccount = () => {
-  const accounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
+  const accounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]').map(account =>
+    account.privateKey && account.password ? toStoredAccount(account) : account
+  );
   
   // Hardhat default test accounts to match seed data
   const wardWallet = new ethers.Wallet("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
@@ -60,12 +74,14 @@ export const seedTestAccount = () => {
   const wardPhone = "15876581014";
   let wardAccount = accounts.find(a => a.phone === wardPhone);
   if (!wardAccount) {
-    wardAccount = createLocalBankAccount(wardPhone, "123");
-    accounts.push(wardAccount);
+    wardAccount = {};
   }
   // Force fixed address for demo matching
   wardAccount.address = wardWallet.address;
-  wardAccount.privateKey = wardWallet.privateKey;
+  wardAccount.phone = wardPhone;
+  wardAccount.cardNumber ||= "6222020000000001";
+  wardAccount.isBankUser = true;
+  wardAccount.keystore ||= wardWallet.encryptSync("123");
   wardAccount.accountName = "被监护人 (张三)";
   wardAccount.role = "ward";
 
@@ -73,12 +89,14 @@ export const seedTestAccount = () => {
   const guardianPhone = "13826193664";
   let guardianAccount = accounts.find(a => a.phone === guardianPhone);
   if (!guardianAccount) {
-    guardianAccount = createLocalBankAccount(guardianPhone, "123");
-    accounts.push(guardianAccount);
+    guardianAccount = {};
   }
   // Force fixed address for demo matching
   guardianAccount.address = guardianWallet.address;
-  guardianAccount.privateKey = guardianWallet.privateKey;
+  guardianAccount.phone = guardianPhone;
+  guardianAccount.cardNumber ||= "6222020000000002";
+  guardianAccount.isBankUser = true;
+  guardianAccount.keystore ||= guardianWallet.encryptSync("123");
   guardianAccount.accountName = "监护人 (李四)";
   guardianAccount.role = "guardian";
 
@@ -86,21 +104,28 @@ export const seedTestAccount = () => {
   const merchantPhone = "13900000000";
   let merchantAccount = accounts.find(a => a.phone === merchantPhone);
   if (!merchantAccount) {
-    merchantAccount = createLocalBankAccount(merchantPhone, "123");
-    accounts.push(merchantAccount);
+    merchantAccount = {};
   }
   // Force fixed address for Account #3
   merchantAccount.address = "0x90F79bf6eb2c4f870365E785982E1f101E93b906";
-  merchantAccount.privateKey = "0x7c9f28a054e5a8722797e85c84d78627b03b223e74c83e0544b6c2057393437e";
+  merchantAccount.phone = merchantPhone;
+  merchantAccount.cardNumber ||= "6222020000000003";
+  merchantAccount.isBankUser = true;
+  merchantAccount.keystore ||= new ethers.Wallet("0x7c9f28a054e5a8722797e85c84d78627b03b223e74c83e0544b6c2057393437e").encryptSync("123");
   merchantAccount.accountName = "特约商户 (王五)";
   merchantAccount.role = "merchant";
 
-  localStorage.setItem('bank_all_accounts', JSON.stringify(accounts));
+  const safeAccounts = accounts.filter(a => ![wardAccount.address, guardianAccount.address, merchantAccount.address].includes(a.address));
+  safeAccounts.push(wardAccount, guardianAccount, merchantAccount);
+  localStorage.setItem('bank_all_accounts', JSON.stringify(safeAccounts));
 
   // Sync current user if they are logged in with a test account
   const currentUser = JSON.parse(localStorage.getItem('bank_current_user') || 'null');
   if (currentUser) {
-    if (currentUser.phone === wardPhone) {
+    if (currentUser.privateKey || currentUser.password) {
+      activeAccount = null;
+      localStorage.removeItem('bank_current_user');
+    } else if (currentUser.phone === wardPhone) {
       localStorage.setItem('bank_current_user', JSON.stringify(wardAccount));
     } else if (currentUser.phone === guardianPhone) {
       localStorage.setItem('bank_current_user', JSON.stringify(guardianAccount));
@@ -121,10 +146,14 @@ export const findAccountByPhone = (phone) => {
 };
 
 export const getLocalBankUser = () => {
+  if (activeAccount) return activeAccount;
   const data = localStorage.getItem('bank_current_user');
   return data ? JSON.parse(data) : null;
 };
 
+export const getActivePrivateKey = () => activeAccount?.privateKey || null;
+
 export const logoutLocalBank = () => {
+  activeAccount = null;
   localStorage.removeItem('bank_current_user');
 };

@@ -4,7 +4,7 @@ import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { Navbar } from '../layout/Navbar';
 import { AiAnalysisCard } from '../AiAnalysis/AiAnalysisCard';
-import { getApiUrl } from '../../utils/api';
+import { authenticatedFetch } from '../../utils/authenticatedFetch';
 
 export const MerchantDashboard = ({ account, onLogout }) => {
   const [loading, setLoading] = useState(false);
@@ -19,7 +19,7 @@ export const MerchantDashboard = ({ account, onLogout }) => {
   const fetchMerchantData = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(getApiUrl('/api/admin/all-data'));
+      const response = await authenticatedFetch(`/api/merchant/transactions/${account.address}`);
       const data = await response.json();
       if (data.success) {
         // 过滤属于该商家的收款流水（通过 merchant_address 或者备注匹配）

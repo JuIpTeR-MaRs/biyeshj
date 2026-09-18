@@ -7,6 +7,7 @@ import {
   CONTRACT_ADDRESS,
   CONTRACT_ABI
 } from '../utils/contract';
+import { getActivePrivateKey } from '../utils/bankAccount';
 
 // Mock ethers.js 模块，拦截 JsonRpcProvider, Wallet, Contract 调用
 const { mockJsonRpcProvider, mockWallet, mockContract } = vi.hoisted(() => {
@@ -47,6 +48,10 @@ vi.mock('ethers', async (importOriginal) => {
 vi.mock('../utils/api', () => ({
   getApiUrl: vi.fn((path) => `http://127.0.0.1:3000${path}`),
   getRpcUrl: vi.fn(() => 'http://127.0.0.1:8545')
+}));
+
+vi.mock('../utils/bankAccount', () => ({
+  getActivePrivateKey: vi.fn(() => null)
 }));
 
 describe('src/utils/contract.js - 单元测试 (Mock 隔离外部以太坊节点)', () => {
@@ -252,25 +257,13 @@ describe('src/utils/contract.js - 单元测试 (Mock 隔离外部以太坊节点
       expect(contract.address).toBe(CONTRACT_ADDRESS);
     });
 
-    it('未显式传入私钥但 localStorage 存储了当前用户私钥时，应自动读取并注入 Wallet 签名器', async () => {
+    it('未显式传入私钥时，应只从内存会话 vault 读取并注入 Wallet 签名器', async () => {
       const storedPrivateKey = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd';
-      const mockUserData = JSON.stringify({
-        username: 'ward_user',
-        address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
-        role: 'ward',
-        privateKey: storedPrivateKey
-      });
-
-      const mockLocalStorage = {
-        getItem: vi.fn((key) => (key === 'bank_current_user' ? mockUserData : null)),
-        setItem: vi.fn()
-      };
-      vi.stubGlobal('localStorage', mockLocalStorage);
-      vi.stubGlobal('window', { localStorage: mockLocalStorage });
+      getActivePrivateKey.mockReturnValue(storedPrivateKey);
 
       const contract = await getContract();
 
-      expect(mockLocalStorage.getItem).toHaveBeenCalledWith('bank_current_user');
+      expect(getActivePrivateKey).toHaveBeenCalled();
       expect(mockWallet).toHaveBeenCalledWith(storedPrivateKey, expect.any(mockJsonRpcProvider));
       expect(mockContract).toHaveBeenCalledWith(
         CONTRACT_ADDRESS,

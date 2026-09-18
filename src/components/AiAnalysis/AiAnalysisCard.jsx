@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Loader2, RefreshCw, AlertCircle, FileText, Copy, Check, Lightbulb, TrendingUp, AlertTriangle, ShieldCheck, BarChart3 } from 'lucide-react';
-import { getApiUrl } from '../../utils/api';
+import { authenticatedFetch } from '../../utils/authenticatedFetch';
 import { toast } from 'react-toastify';
 
 export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
@@ -142,7 +142,7 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
     setVerificationResult(null);
 
     try {
-      const response = await fetch(getApiUrl('/api/analysis/consumption'), {
+      const response = await authenticatedFetch('/api/analysis/consumption', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ txs, role })

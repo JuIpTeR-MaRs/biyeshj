@@ -1,14 +1,17 @@
 const express = require("express");
 const { ethers } = require("ethers");
 const paymentService = require("./payment-mock");
+const auth = require("./auth");
 require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 
 const app = express();
 app.use(express.json());
 
 // 跨域支持 (允许 Android 模拟器/真机 WebView 发起请求)
+const allowedOrigins = new Set((process.env.CORS_ORIGINS || "http://localhost:5173,capacitor://localhost,http://localhost,https://localhost").split(",").map(v => v.trim()));
 app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
+    const origin = req.get("Origin");
+    if (origin && allowedOrigins.has(origin)) res.header("Access-Control-Allow-Origin", origin);
     res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
     if (req.method === "OPTIONS") {
@@ -19,8 +22,23 @@ app.use((req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 
+app.post("/api/auth/challenge", auth.issueChallenge);
+app.post("/api/auth/session", auth.createWalletSession);
+app.post("/api/auth/admin", auth.createAdminSession);
+
+const requireWallet = (req, res, next) => {
+    if (req.auth?.type !== "wallet") return res.status(403).json({ success: false, error: "Wallet authentication required" });
+    next();
+};
+const requireSelf = (field) => (req, res, next) => {
+    if (!auth.sameAddress(req.auth?.address, req.body?.[field] || req.params?.[field])) {
+        return res.status(403).json({ success: false, error: "Address ownership required" });
+    }
+    next();
+};
+
 // 1. 本地银行支付接口 (包装了区块链交易)
-app.post("/api/bank/transfer", async (req, res) => {
+app.post("/api/bank/transfer", auth.requireAuth, requireWallet, requireSelf("wardAddress"), async (req, res) => {
     const { cardNumber, wardAddress, amount, note } = req.body;
     console.log(`🏦 [Bank Core] Processing transfer from ${cardNumber} to ${wardAddress}`);
     
@@ -48,21 +66,28 @@ app.get("/api/bank/account/:card", (req, res) => {
 });
 
 // 2.5 监护关系绑定入库接口
-app.post("/api/guardian/bind", async (req, res) => {
+app.post("/api/guardian/bind", auth.requireAuth, requireWallet, async (req, res) => {
     const { wardAddress, guardianAddress } = req.body;
     if (!wardAddress || !guardianAddress) {
         return res.status(400).json({ success: false, error: "Missing parameters" });
     }
-    const result = await paymentService.recordGuardianshipBinding(wardAddress, guardianAddress);
+    if (!auth.sameAddress(req.auth.address, wardAddress) && !auth.sameAddress(req.auth.address, guardianAddress)) {
+        return res.status(403).json({ success: false, error: "Binding participant required" });
+    }
+    const isBound = await paymentService.contract.isWardGuardian(wardAddress, guardianAddress);
+    if (!isBound) return res.status(409).json({ success: false, error: "Complete the signed on-chain binding first" });
+    const result = await paymentService.recordGuardianshipBinding(wardAddress, guardianAddress, { mirrorOnly: true });
     res.status(result.success ? 200 : 500).json(result);
 });
 
 // 2.6 保存消费阈值接口
-app.post("/api/guardian/threshold", async (req, res) => {
+app.post("/api/guardian/threshold", auth.requireAuth, requireWallet, async (req, res) => {
     const { wardAddress, amount } = req.body;
     if (!wardAddress || amount === undefined) {
         return res.status(400).json({ success: false, error: "Missing parameters" });
     }
+    const isGuardian = await paymentService.contract.isWardGuardian(wardAddress, req.auth.address);
+    if (!isGuardian) return res.status(403).json({ success: false, error: "Guardian authorization required" });
     const result = await paymentService.saveThreshold(wardAddress, amount);
     res.status(result.success ? 200 : 500).json(result);
 });
@@ -76,7 +101,7 @@ app.get("/api/contract/info", (req, res) => {
 });
 
 // 2.8 获取指定账户的监护关系与阈值状态 (从 MySQL 双重记账直接读取，作为区块链网络的强力兜底与移动端加速)
-app.get("/api/guardian/status/:address", async (req, res) => {
+app.get("/api/guardian/status/:address", auth.requireAuth, requireWallet, requireSelf("address"), async (req, res) => {
     const { address } = req.params;
     if (!address) {
         return res.status(400).json({ success: false, error: "Missing address" });
@@ -107,7 +132,7 @@ app.get("/api/guardian/status/:address", async (req, res) => {
 });
 
 // 2.9 获取指定账户的相关历史消费交易 (从 MySQL 双重记账直接读取，作为移动端秒级加载与强力兜底)
-app.get("/api/transactions/:address", async (req, res) => {
+app.get("/api/transactions/:address", auth.requireAuth, requireWallet, requireSelf("address"), async (req, res) => {
     const { address } = req.params;
     if (!address) {
         return res.status(400).json({ success: false, error: "Missing address" });
@@ -183,9 +208,20 @@ const categoryNames = {
 const mockTrades = new Map();
 const realTradesBackup = new Map(); // Backup amounts for query fallback
 const activeOrders = new Map();
+const approvedOrderReservations = new Map();
+
+const validateApprovedOrder = async (order, paidAmount) => {
+    if (!order?.approvedTxId) return;
+    const txDetail = await paymentService.contract.transactions(order.approvedTxId);
+    const valid = txDetail[0] !== 0n && txDetail[5] === false && txDetail[6] === true && txDetail[7] === false &&
+        txDetail[1].toLowerCase() === order.wardAddress.toLowerCase() &&
+        txDetail[2].toString() === BigInt(order.amount).toString() && txDetail[4] === order.subject &&
+        Number(paidAmount) === Number(order.amount);
+    if (!valid) throw new Error("Payment does not match the approved transaction");
+};
 
 // 3. 发起支付宝沙箱支付 (预创建订单以获取二维码)
-app.post("/api/alipay/pay", async (req, res) => {
+app.post("/api/alipay/pay", auth.requireAuth, requireWallet, requireSelf("wardAddress"), async (req, res) => {
     const { amount, subject, wardAddress, merchantAddress, approvedTxId } = req.body;
     console.log(`💳 [Alipay] Precreating order for ward ${wardAddress}, amount: ${amount} Wei, category: ${subject}, merchant: ${merchantAddress}`);
     
@@ -210,14 +246,22 @@ app.post("/api/alipay/pay", async (req, res) => {
             try {
                 const txDetail = await contract.transactions(approvedTxId);
                 console.log(`🔍 [Risk Control Check] Chain Tx Details - ID: ${txDetail[0]}, Ward: ${txDetail[1]}, Amount: ${txDetail[2]}, isPending: ${txDetail[5]}, isApproved: ${txDetail[6]}`);
-                if (txDetail[6] === true && txDetail[1].toLowerCase() === wardAddress.toLowerCase()) {
+                const amountMatches = txDetail[2].toString() === BigInt(amount).toString();
+                const categoryMatches = txDetail[4] === subject;
+                if (txDetail[6] === true && txDetail[5] === false && txDetail[7] === false &&
+                    txDetail[1].toLowerCase() === wardAddress.toLowerCase() && amountMatches && categoryMatches) {
+                    if (approvedOrderReservations.has(String(approvedTxId))) {
+                        return res.status(409).json({ success: false, error: "Approved transaction already has a payment order" });
+                    }
+                    approvedOrderReservations.set(String(approvedTxId), outTradeNo);
                     skipRiskControl = true;
                     console.log(`✅ [Risk Control] Bypassing risk control for previously approved tx: ${approvedTxId}`);
                 } else {
-                    console.log(`❌ [Risk Control Check] Validation failed: isApproved=${txDetail[6]} (expected true), ward match=${txDetail[1].toLowerCase() === wardAddress.toLowerCase()}`);
+                    return res.status(409).json({ success: false, error: "Approved transaction does not match this unpaid order" });
                 }
             } catch (err) {
                 console.error("Failed to verify approvedTxId on chain:", err);
+                return res.status(409).json({ success: false, error: "Unable to verify approved transaction" });
             }
         }
         
@@ -253,6 +297,7 @@ app.post("/api/alipay/pay", async (req, res) => {
         }
         
         activeOrders.set(outTradeNo, {
+            ownerAddress: req.auth.address,
             wardAddress,
             merchantAddress,
             amount,
@@ -282,23 +327,30 @@ app.post("/api/alipay/pay", async (req, res) => {
         res.json({ success: true, qrCode, outTradeNo });
     } catch (err) {
         console.error("Alipay error:", err.message);
-        console.warn("⚠️ 支付宝沙箱宕机，自动切入 Mock Fallback 模式");
-        mockTrades.set(outTradeNo, { amount, status: 'WAIT_BUYER_PAY', createdAt: Date.now() });
-        // 生成一个包含兜底提示的虚拟二维码数据
-        const mockQrData = `MOCK_ALIPAY_FALLBACK_${outTradeNo}`;
-        res.json({ success: true, qrCode: mockQrData, outTradeNo, isMock: true });
+        activeOrders.delete(outTradeNo);
+        if (approvedTxId && approvedOrderReservations.get(String(approvedTxId)) === outTradeNo) {
+            approvedOrderReservations.delete(String(approvedTxId));
+        }
+        return res.status(502).json({ success: false, error: "支付服务暂时不可用，请稍后重试" });
     }
 });
 
 // 3.4 取消支付订单 (前端点击取消支付时触发)
-app.post("/api/alipay/cancel", async (req, res) => {
+app.post("/api/alipay/cancel", auth.requireAuth, requireWallet, async (req, res) => {
     const { outTradeNo } = req.body;
     if (!outTradeNo) {
         return res.status(400).json({ success: false, error: "缺少订单号 outTradeNo" });
     }
+    const order = activeOrders.get(outTradeNo);
+    if (!order || !auth.sameAddress(order.ownerAddress, req.auth.address)) {
+        return res.status(404).json({ success: false, error: "Order not found" });
+    }
 
     console.log(`🚫 [Alipay Cancel] Canceling trade ${outTradeNo}...`);
     canceledTrades.add(outTradeNo);
+    if (order.approvedTxId && approvedOrderReservations.get(String(order.approvedTxId)) === outTradeNo) {
+        approvedOrderReservations.delete(String(order.approvedTxId));
+    }
 
     // 如果是 Mock 订单，直接标记为已关闭
     if (mockTrades.has(outTradeNo)) {
@@ -327,10 +379,14 @@ const processingTrades = new Map();
 const canceledTrades = new Set();
 
 // 3.5 查询支付宝支付状态并上链
-app.get("/api/alipay/query", async (req, res) => {
+app.get("/api/alipay/query", auth.requireAuth, requireWallet, async (req, res) => {
     const { outTradeNo } = req.query;
     if (!outTradeNo) {
         return res.status(400).json({ success: false, error: "缺少订单号 outTradeNo" });
+    }
+    const ownedOrder = activeOrders.get(outTradeNo);
+    if (!ownedOrder || !auth.sameAddress(ownedOrder.ownerAddress, req.auth.address)) {
+        return res.status(404).json({ success: false, error: "Order not found" });
     }
 
     if (canceledTrades.has(outTradeNo)) {
@@ -372,6 +428,7 @@ app.get("/api/alipay/query", async (req, res) => {
 
                     if (approvedTxIdRaw && approvedTxIdRaw !== "0") {
                         console.log(`✅ [Mock Alipay Query] Verified success for previously approved transaction ID: ${approvedTxIdRaw}. Bypassing duplicate on-chain record.`);
+                        await validateApprovedOrder(order, amount);
                         const markResult = await paymentService.markPaymentSuccess(approvedTxIdRaw);
                         if (!markResult.success) throw new Error(markResult.error);
                         return true;
@@ -438,6 +495,7 @@ app.get("/api/alipay/query", async (req, res) => {
 
                     if (approvedTxIdRaw && approvedTxIdRaw !== "0") {
                         console.log(`✅ [Alipay Query] Verified success for previously approved transaction ID: ${approvedTxIdRaw}. Bypassing duplicate on-chain record.`);
+                        await validateApprovedOrder(order, amount);
                         const markResult = await paymentService.markPaymentSuccess(approvedTxIdRaw);
                         if (!markResult.success) throw new Error(markResult.error);
                         return true;
@@ -472,14 +530,7 @@ app.get("/api/alipay/query", async (req, res) => {
         }
     } catch (err) {
         console.error("Alipay query error:", err.message);
-        console.warn(`⚠️ 支付宝查询接口宕机，将订单 ${outTradeNo} 强制转入兜底方案`);
-        
-        // 如果真实的查询挂了，我们将这笔订单转为 Mock 订单，以便下次轮询时自动成功
-        const amount = realTradesBackup.get(outTradeNo) || 10;
-        mockTrades.set(outTradeNo, { amount, status: 'TRADE_SUCCESS', createdAt: Date.now() - 6000 });
-        
-        // 返回等待状态，让前端在下次轮询时触发 Mock 成功逻辑
-        return res.json({ success: true, status: 'WAIT_BUYER_PAY' });
+        return res.status(502).json({ success: false, status: "UNKNOWN", error: "无法验证支付状态" });
     }
 });
 
@@ -641,20 +692,24 @@ app.get("/api/alipay/return", async (req, res) => {
         }
 
         const outTradeNo = req.query.out_trade_no;
-        let addressRaw, code, merchRaw, approvedTxIdRaw;
         const order = activeOrders.get(outTradeNo);
-        if (order) {
-            addressRaw = order.wardAddress.replace(/^0x/, "");
-            code = categoryCodes[order.subject] || "SHOP";
-            merchRaw = order.merchantAddress ? order.merchantAddress.replace(/^0x/, "") : "0";
-            approvedTxIdRaw = order.approvedTxId || "0";
-        } else {
-            const parts = outTradeNo.split("_");
-            addressRaw = parts[0];
-            code = parts[1];
-            merchRaw = parts[2];
-            approvedTxIdRaw = parts[3];
+        if (!outTradeNo || !order) {
+            return res.status(409).send("支付订单不存在或已过期，交易未上链");
         }
+        if (req.query.trade_status !== "TRADE_SUCCESS") {
+            return res.status(409).send("支付状态尚未成功，交易未上链");
+        }
+        if (process.env.ALIPAY_APP_ID && req.query.app_id !== process.env.ALIPAY_APP_ID) {
+            return res.status(409).send("支付应用标识不匹配，交易未上链");
+        }
+        if (Number(req.query.total_amount) !== Number(order.amount)) {
+            return res.status(409).send("支付金额与订单不匹配，交易未上链");
+        }
+        let addressRaw, code, merchRaw, approvedTxIdRaw;
+        addressRaw = order.wardAddress.replace(/^0x/, "");
+        code = categoryCodes[order.subject] || "SHOP";
+        merchRaw = order.merchantAddress ? order.merchantAddress.replace(/^0x/, "") : "0";
+        approvedTxIdRaw = order.approvedTxId || "0";
         const wardAddress = "0x" + addressRaw;
         const merchantAddress = merchRaw !== "0" ? "0x" + merchRaw : null;
         const category = categoryNames[code] || "模拟消费";
@@ -663,6 +718,7 @@ app.get("/api/alipay/return", async (req, res) => {
         let result;
         if (approvedTxIdRaw && approvedTxIdRaw !== "0") {
             console.log(`✅ [Alipay Return] Verified success for previously approved transaction ID: ${approvedTxIdRaw}. Bypassing duplicate on-chain record.`);
+            await validateApprovedOrder(order, amount);
             const markResult = await paymentService.markPaymentSuccess(approvedTxIdRaw);
             result = markResult;
         } else {
@@ -874,7 +930,7 @@ app.get("/api/alipay/return", async (req, res) => {
 });
 
 // 5. 管理员获取后台全部数据
-app.get("/api/admin/all-data", async (req, res) => {
+app.get("/api/admin/all-data", auth.requireAuth, auth.requireAdmin, async (req, res) => {
     try {
         const data = await paymentService.getAllAdminData();
         if (data.success) {
@@ -887,11 +943,54 @@ app.get("/api/admin/all-data", async (req, res) => {
     }
 });
 
+app.get("/api/merchant/transactions/:address", auth.requireAuth, requireWallet, requireSelf("address"), async (req, res) => {
+    try {
+        const [rows] = await paymentService.dbPool.execute(
+            "SELECT id, ward_address, amount, merchant_type, tx_hash, created_at, merchant_address, is_pending, is_approved, is_paid FROM transactions WHERE LOWER(merchant_address) = LOWER(?) ORDER BY id DESC",
+            [req.auth.address]
+        );
+        res.json({ success: true, transactions: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // 6. 消费历史 AI 智能分析接口 (DeepSeek)
-app.post("/api/analysis/consumption", async (req, res) => {
+const aiRequests = new Map();
+let aiGlobalRequests = [];
+app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
     const { txs, role } = req.body;
-    if (!txs || !Array.isArray(txs)) {
+    if (!txs || !Array.isArray(txs) || txs.length === 0) {
         return res.status(400).json({ success: false, error: "缺少交易流水数据 txs" });
+    }
+    if (txs.length > 200) return res.status(413).json({ success: false, error: "交易数量超过上限" });
+    const principal = req.auth.address;
+    const now = Date.now();
+    aiGlobalRequests = aiGlobalRequests.filter(ts => now - ts < 60_000);
+    if (aiGlobalRequests.length >= 30) return res.status(429).json({ success: false, error: "AI 服务已达到全局速率上限" });
+    const recent = (aiRequests.get(principal) || []).filter(ts => now - ts < 60_000);
+    if (recent.length >= 5) return res.status(429).json({ success: false, error: "AI 请求过于频繁" });
+    recent.push(now);
+    aiRequests.set(principal, recent);
+    aiGlobalRequests.push(now);
+    for (const [address, timestamps] of aiRequests) {
+        const live = timestamps.filter(ts => now - ts < 60_000);
+        if (live.length) aiRequests.set(address, live);
+        else aiRequests.delete(address);
+    }
+    if (role === "admin" && req.auth.type !== "admin") {
+        return res.status(403).json({ success: false, error: "Admin role required" });
+    }
+    if (req.auth.type !== "admin") {
+        for (const item of txs) {
+            const ward = item.ward || item.ward_address;
+            const merchant = item.merchantAddress || item.merchant_address;
+            let allowed = false;
+            if (role === "merchant") allowed = auth.sameAddress(principal, merchant);
+            else if (role === "guardian") allowed = Boolean(ward) && await paymentService.contract.isWardGuardian(ward, principal);
+            else allowed = auth.sameAddress(principal, ward);
+            if (!allowed) return res.status(403).json({ success: false, error: "Unauthorized transaction data" });
+        }
     }
 
     const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -976,7 +1075,8 @@ app.post("/api/analysis/consumption", async (req, res) => {
             let onChainTxHash = null;
             const month = new Date().toISOString().slice(0, 7); // 格式：YYYY-MM
 
-            if (wardAddress && wardAddress.startsWith("0x")) {
+            const mayPersistWardReport = req.auth.type === "admin" || role === "guardian" || role === "ward";
+            if (mayPersistWardReport && wardAddress && wardAddress.startsWith("0x")) {
                 const crypto = require("crypto");
                 // 1. 使用 crypto 计算报告正文的 SHA-256 哈希值
                 reportHash = "0x" + crypto.createHash("sha256").update(analysisText).digest("hex");
@@ -1029,6 +1129,7 @@ app.post("/api/analysis/consumption", async (req, res) => {
 });
 
 paymentService.generateSeedData();
-app.listen(PORT, () => {
+const HOST = process.env.HOST || "127.0.0.1";
+app.listen(PORT, HOST, () => {
     console.log(`🏦 Local Bank Core running on http://localhost:${PORT}`);
 });

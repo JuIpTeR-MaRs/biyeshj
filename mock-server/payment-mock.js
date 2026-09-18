@@ -202,11 +202,12 @@ class PaymentMockService {
         }
     }
 
-    async recordGuardianshipBinding(wardAddress, guardianAddress) {
+    async recordGuardianshipBinding(wardAddress, guardianAddress, { mirrorOnly = false } = {}) {
         try {
             // 1. 链上原子化同步绑定 (利用 Oracle/Owner 权限)
             try {
                 const isBound = await this.contract.isWardGuardian(wardAddress, guardianAddress);
+                if (mirrorOnly && !isBound) return { success: false, error: "On-chain binding required" };
                 if (!isBound) {
                     const tx = await this.contract.bindGuardian(wardAddress, guardianAddress, { gasPrice: 0 });
                     await tx.wait();

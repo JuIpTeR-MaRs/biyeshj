@@ -37,17 +37,21 @@ export const getHostIp = () => {
  * 获取区块链 RPC 服务端点
  */
 export const getRpcUrl = () => {
+  if (import.meta.env.VITE_RPC_URL) return import.meta.env.VITE_RPC_URL;
   const host = getHostIp();
-  return `http://${host}:8545`;
+  const scheme = isNative() && import.meta.env.PROD ? 'https' : 'http';
+  return `${scheme}://${host}:8545`;
 };
 
 /**
  * 获取后端 Mock / 业务 API 基础 URL
  */
 export const getApiBaseUrl = () => {
+  if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL.replace(/\/$/, '');
   if (isNative()) {
     const host = getHostIp();
-    return `http://${host}:3000`;
+    const scheme = import.meta.env.PROD ? 'https' : 'http';
+    return `${scheme}://${host}:3000`;
   }
   return '';
 };

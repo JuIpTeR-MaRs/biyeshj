@@ -7,7 +7,7 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 const CONTRACT_ABI = [
     "function recordPayment(address _ward, uint256 _amount, string calldata _merchantType) external",
     "function txCounter() view returns (uint256)",
-    "function bannedMerchants(string) view returns (bool)",
+    "function bannedMerchants(address,string) view returns (bool)",
     "function threshold(address) view returns (uint256)",
     "function wardToGuardian(address) view returns (address)",
     "function isWardGuardian(address,address) view returns (bool)",
@@ -34,6 +34,7 @@ class PaymentMockService {
         // 初始化 MySQL 连接池
         this.dbPool = mysql.createPool({
             host: process.env.DB_HOST,
+            port: Number(process.env.DB_PORT || 3306),
             user: process.env.DB_USER,
             password: process.env.DB_PASSWORD,
             database: process.env.DB_NAME,
@@ -42,8 +43,51 @@ class PaymentMockService {
             queueLimit: 0
         });
 
+        this.localLedgerPath = path.join(__dirname, "local-ledger.json");
+        this.localLedger = this.loadLocalLedger();
+
         // 异步初始化数据库表
         this.initDatabase();
+    }
+
+    loadLocalLedger() {
+        try {
+            const ledger = JSON.parse(fs.readFileSync(this.localLedgerPath, "utf8"));
+            return {
+                transactions: Array.isArray(ledger.transactions) ? ledger.transactions : [],
+                bindings: Array.isArray(ledger.bindings) ? ledger.bindings : [],
+                thresholds: Array.isArray(ledger.thresholds) ? ledger.thresholds : []
+            };
+        } catch {
+            const seedTransactions = JSON.parse(fs.readFileSync(path.join(__dirname, "seed-data.json"), "utf8"))
+                .map(item => ({
+                    id: item.id,
+                    ward_address: item.wardAddress,
+                    amount: String(item.amount),
+                    merchant_type: item.merchantType,
+                    created_at: item.timestamp
+                }));
+            const ledger = {
+                transactions: seedTransactions,
+                bindings: [{
+                    id: "demo-binding-1",
+                    ward_address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+                    guardian_address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+                    created_at: new Date().toISOString()
+                }],
+                thresholds: [{
+                    ward_address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+                    threshold_amount: "800",
+                    updated_at: new Date().toISOString()
+                }]
+            };
+            fs.writeFileSync(this.localLedgerPath, JSON.stringify(ledger, null, 2));
+            return ledger;
+        }
+    }
+
+    saveLocalLedger() {
+        fs.writeFileSync(this.localLedgerPath, JSON.stringify(this.localLedger, null, 2));
     }
 
     async initDatabase() {
@@ -192,7 +236,19 @@ class PaymentMockService {
                 console.log(`[MySQL] 成功写入本地数据库, ID: ${result.insertId}`);
             } catch (dbError) {
                 console.error(`[MySQL] 写入本地数据库失败:`, dbError.message);
-                // 这里可以选择不阻塞主流程，就算本地数据库出错，区块链上已经成功了
+                this.localLedger.transactions.unshift({
+                    id: txHash,
+                    ward_address: wardAddress,
+                    amount: String(amount),
+                    merchant_type: merchantType,
+                    merchant_address: merchantAddress,
+                    tx_hash: txHash,
+                    is_pending: true,
+                    is_approved: false,
+                    is_paid: false,
+                    created_at: new Date().toISOString()
+                });
+                this.saveLocalLedger();
             }
 
             return { success: true, txHash };
@@ -226,7 +282,20 @@ class PaymentMockService {
             return { success: true };
         } catch (dbError) {
             console.error(`[MySQL] 写入监护关系绑定失败:`, dbError.message);
-            return { success: false, error: dbError.message };
+            const exists = this.localLedger.bindings.some(item =>
+                item.ward_address.toLowerCase() === wardAddress.toLowerCase() &&
+                item.guardian_address.toLowerCase() === guardianAddress.toLowerCase()
+            );
+            if (!exists) {
+                this.localLedger.bindings.unshift({
+                    id: `${wardAddress}-${guardianAddress}`,
+                    ward_address: wardAddress,
+                    guardian_address: guardianAddress,
+                    created_at: new Date().toISOString()
+                });
+                this.saveLocalLedger();
+            }
+            return { success: true, storage: "local" };
         }
     }
 
@@ -240,7 +309,12 @@ class PaymentMockService {
             return { success: true };
         } catch (dbError) {
             console.error(`[MySQL] 写入消费阈值失败:`, dbError.message);
-            return { success: false, error: dbError.message };
+            const index = this.localLedger.thresholds.findIndex(item => item.ward_address.toLowerCase() === wardAddress.toLowerCase());
+            const threshold = { ward_address: wardAddress, threshold_amount: String(amount), updated_at: new Date().toISOString() };
+            if (index >= 0) this.localLedger.thresholds[index] = threshold;
+            else this.localLedger.thresholds.unshift(threshold);
+            this.saveLocalLedger();
+            return { success: true, storage: "local" };
         }
     }
 
@@ -275,7 +349,7 @@ class PaymentMockService {
             };
         } catch (error) {
             console.error(`[MySQL] 获取管理员数据失败:`, error.message);
-            return { success: false, error: error.message };
+            return { success: true, ...this.localLedger, storage: "local" };
         }
     }
 

@@ -4,16 +4,22 @@ import { getLocalBankUser } from './bankAccount';
 
 const TOKEN_KEY = 'guardian_api_session';
 const TYPE_KEY = 'guardian_api_session_type';
+const ADDRESS_KEY = 'guardian_api_session_address';
 
-const storeToken = (token) => sessionStorage.setItem(TOKEN_KEY, token);
+const storeToken = (token, address = null) => {
+  sessionStorage.setItem(TOKEN_KEY, token);
+  if (address) sessionStorage.setItem(ADDRESS_KEY, address.toLowerCase());
+  else sessionStorage.removeItem(ADDRESS_KEY);
+};
 export const clearApiSession = () => {
   sessionStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TYPE_KEY);
+  sessionStorage.removeItem(ADDRESS_KEY);
 };
 
-export const loginAdminApi = async (password) => {
+export const loginAdminApi = async (password, phone, smsCode) => {
   const response = await fetch(getApiUrl('/api/auth/admin'), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password })
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, phone, smsCode })
   });
   const data = await response.json();
   if (!response.ok || !data.token) throw new Error(data.error || '管理员认证失败');
@@ -22,7 +28,18 @@ export const loginAdminApi = async (password) => {
   return data.token;
 };
 
-const loginWalletApi = async (accountOverride) => {
+const pendingWalletLogins = new Map();
+
+const loginWalletApi = (accountOverride) => {
+  const account = accountOverride || getLocalBankUser();
+  const address = account?.address?.toLowerCase();
+  if (pendingWalletLogins.has(address)) return pendingWalletLogins.get(address);
+  const pending = createWalletSession(account).finally(() => pendingWalletLogins.delete(address));
+  pendingWalletLogins.set(address, pending);
+  return pending;
+};
+
+const createWalletSession = async (accountOverride) => {
   const account = accountOverride || getLocalBankUser();
   if (!account?.address || !account?.privateKey) throw new Error('请先解锁本地钱包');
   const challengeResponse = await fetch(getApiUrl('/api/auth/challenge'), {
@@ -37,12 +54,18 @@ const loginWalletApi = async (accountOverride) => {
   });
   const session = await sessionResponse.json();
   if (!sessionResponse.ok || !session.token) throw new Error(session.error || '钱包认证失败');
-  storeToken(session.token);
+  storeToken(session.token, account.address);
   sessionStorage.setItem(TYPE_KEY, 'wallet');
   return session.token;
 };
 
 export const authenticatedFetch = async (path, options = {}, accountOverride = null) => {
+  const account = accountOverride || getLocalBankUser();
+  const sessionType = sessionStorage.getItem(TYPE_KEY);
+  const sessionAddress = sessionStorage.getItem(ADDRESS_KEY);
+  if (sessionType === 'wallet' && (!account?.address || sessionAddress !== account.address.toLowerCase())) {
+    clearApiSession();
+  }
   let token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) token = await loginWalletApi(accountOverride);
   const request = () => fetch(getApiUrl(path), {

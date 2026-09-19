@@ -23,6 +23,7 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 3000;
 
 app.post("/api/auth/challenge", auth.issueChallenge);
+app.post("/api/auth/admin/sms", auth.issueAdminSmsCode);
 app.post("/api/auth/session", auth.createWalletSession);
 app.post("/api/auth/admin", auth.createAdminSession);
 
@@ -182,14 +183,19 @@ app.get("/api/transactions/:address", auth.requireAuth, requireWallet, requireSe
 
 // 支付宝 SDK 初始化
 const { AlipaySdk } = require("alipay-sdk");
-const alipaySdk = new AlipaySdk({
+const hasAlipayConfig = Boolean(
+    process.env.ALIPAY_APP_ID && process.env.ALIPAY_PRIVATE_KEY && process.env.ALIPAY_PUBLIC_KEY
+);
+const alipaySdk = hasAlipayConfig ? new AlipaySdk({
     appId: process.env.ALIPAY_APP_ID,
     privateKey: process.env.ALIPAY_PRIVATE_KEY,
     alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY,
     gateway: process.env.ALIPAY_GATEWAY,
     keyType: 'PKCS8',
     timeout: 15000
-});
+}) : null;
+
+if (!hasAlipayConfig) console.warn("[Alipay] 未配置沙箱密钥，支付宝支付接口不可用；管理员和本地模拟服务正常启动。");
 
 const categoryCodes = {
     "餐饮美食": "FOOD",
@@ -269,7 +275,7 @@ app.post("/api/alipay/pay", auth.requireAuth, requireWallet, requireSelf("wardAd
         const hasGuardian = guardian !== ethers.ZeroAddress;
         
         // 1. 检查商户是否在黑名单中
-        const isBanned = await contract.bannedMerchants(subject);
+        const isBanned = await contract.bannedMerchants(wardAddress, subject);
         
         // 2. 检查交易金额是否超过设定的限额阈值
         const currentThreshold = await contract.threshold(wardAddress);
@@ -993,11 +999,6 @@ app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
         }
     }
 
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) {
-        return res.status(500).json({ success: false, error: "系统未配置 DEEPSEEK_API_KEY，请检查环境配置" });
-    }
-
     // 格式化交易记录，使其更易读
     const normalizeTxs = (list) => {
         return list.map(t => {
@@ -1024,6 +1025,33 @@ app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
     };
 
     const formattedTxs = normalizeTxs(txs);
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+
+    if (!apiKey) {
+        const amounts = txs.map(item => Number(item.amount) || 0);
+        const total = amounts.reduce((sum, amount) => sum + amount, 0);
+        const average = total / txs.length;
+        const highest = Math.max(...amounts);
+        const highValueCount = amounts.filter(amount => amount >= 800).length;
+        const categories = txs.reduce((counts, item) => {
+            const category = item.merchantType || item.merchant_type || "未知";
+            counts.set(category, (counts.get(category) || 0) + 1);
+            return counts;
+        }, new Map());
+        const topCategories = [...categories.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([category, count]) => `${category}（${count} 笔）`)
+            .join("、");
+        const wardCount = new Set(txs.map(item => item.ward || item.ward_address).filter(Boolean)).size;
+        const scope = role === "admin" ? `覆盖 **${wardCount} 个账户** 的平台流水` : "基于当前可见流水";
+        const riskText = highValueCount > 0
+            ? `发现 **${highValueCount} 笔**金额不低于 800 的交易，建议结合监护阈值和审批状态复核。`
+            : "未发现达到 800 的高额交易，当前金额分布较平稳。";
+        const analysis = `## 本地规则分析报告\n\n- ${scope}，共 **${txs.length} 笔**交易，累计金额 **${total.toFixed(2)} 元**，平均每笔 **${average.toFixed(2)} 元**。\n- 单笔最高金额为 **${highest.toFixed(2)} 元**；主要消费类别：**${topCategories || "暂无"}**。\n\n## 风险观察\n\n- ${riskText}\n- 建议管理员定期核验监护关系、阈值配置与高额交易审批状态。\n\n## 说明\n\n当前未配置 DeepSeek API Key，以上结果由本地规则引擎生成，不会调用外部 AI 服务。`;
+        console.log(`[AI Analysis] DeepSeek 未配置，返回本地规则分析：${txs.length} 笔`);
+        return res.json({ success: true, analysis, source: "local-rules" });
+    }
 
     let systemPrompt = "";
     if (role === 'admin') {

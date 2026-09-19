@@ -11,7 +11,7 @@ const toStoredAccount = (account) => {
 /**
  * 模拟银行账户生成器
  */
-export const createLocalBankAccount = (phone = "", password = "") => {
+export const createLocalBankAccount = (phone = "", password = "", accountName = "") => {
   const wallet = ethers.Wallet.createRandom();
   const cardPrefix = "622202";
   const randomSuffix = Math.floor(Math.random() * 10000000000).toString().padStart(10, '0');
@@ -21,7 +21,7 @@ export const createLocalBankAccount = (phone = "", password = "") => {
     cardNumber: cardNumber,
     address: wallet.address,
     privateKey: wallet.privateKey,
-    accountName: phone ? `用户_${phone.slice(-4)}` : `模拟用户_${cardNumber.slice(-4)}`,
+    accountName: accountName.trim() || (phone ? `用户_${phone.slice(-4)}` : `模拟用户_${cardNumber.slice(-4)}`),
     phone: phone,
     password: password,
     isBankUser: true
@@ -107,11 +107,24 @@ export const seedTestAccount = () => {
     merchantAccount = {};
   }
   // Force fixed address for Account #3
-  merchantAccount.address = "0x90F79bf6eb2c4f870365E785982E1f101E93b906";
+  const merchantWallet = new ethers.Wallet("0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6");
+  merchantAccount.address = merchantWallet.address;
   merchantAccount.phone = merchantPhone;
   merchantAccount.cardNumber ||= "6222020000000003";
   merchantAccount.isBankUser = true;
-  merchantAccount.keystore ||= new ethers.Wallet("0x7c9f28a054e5a8722797e85c84d78627b03b223e74c83e0544b6c2057393437e").encryptSync("123");
+  // 旧版演示数据可能已错误地标为“迁移完成”。实际解锁并核对地址，
+  // 只有钱包与预置商户地址一致时才保留缓存。
+  let merchantKeystoreMatches = false;
+  try {
+    const cachedWallet = ethers.Wallet.fromEncryptedJsonSync(merchantAccount.keystore || '', "123");
+    merchantKeystoreMatches = cachedWallet.address === merchantWallet.address;
+  } catch {
+    merchantKeystoreMatches = false;
+  }
+  if (!merchantKeystoreMatches) {
+    merchantAccount.keystore = merchantWallet.encryptSync("123");
+  }
+  merchantAccount.demoCredentialVersion = 2;
   merchantAccount.accountName = "特约商户 (王五)";
   merchantAccount.role = "merchant";
 

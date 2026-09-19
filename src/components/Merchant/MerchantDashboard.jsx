@@ -22,8 +22,16 @@ export const MerchantDashboard = ({ account, onLogout }) => {
       const response = await authenticatedFetch(`/api/merchant/transactions/${account.address}`);
       const data = await response.json();
       if (data.success) {
-        // 过滤属于该商家的收款流水（通过 merchant_address 或者备注匹配）
-        const filtered = data.transactions.filter(t => 
+        // API 使用 camelCase；界面历史数据保留 snake_case，先在这里统一表示。
+        const transactions = data.transactions.map(t => ({
+          ...t,
+          ward_address: t.ward_address || t.ward,
+          merchant_address: t.merchant_address || t.merchantAddress,
+          merchant_type: t.merchant_type || t.merchantType || '',
+          created_at: t.created_at || (t.timestamp ? new Date(t.timestamp * 1000).toISOString() : null)
+        }));
+        // 过滤属于该商家的收款流水（通过 merchant_address 或备注匹配）
+        const filtered = transactions.filter(t =>
           (t.merchant_address && t.merchant_address.toLowerCase() === account.address.toLowerCase()) ||
           t.merchant_type.includes(account.accountName)
         );

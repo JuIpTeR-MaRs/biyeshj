@@ -149,6 +149,43 @@ describe("GuardianDApp 智能合约综合测试套件", function () {
       ).to.be.revertedWithCustomError(dapp, "NoPendingRequestForYou");
     });
 
+    it("监护人可主动邀请被监护人，且被监护人接受后才建立绑定关系", async function () {
+      const { dapp, ward, guardian } = await loadFixture(deployGuardianDAppFixture);
+
+      await expect(dapp.connect(guardian).requestGuardianshipInvite(ward.address))
+        .to.emit(dapp, "GuardianInvitationRequested")
+        .withArgs(ward.address, guardian.address);
+      expect(await dapp.pendingGuardianInvites(ward.address)).to.equal(guardian.address);
+      expect(await dapp.isWardGuardian(ward.address, guardian.address)).to.be.false;
+
+      await expect(dapp.connect(ward).acceptGuardianInvitation())
+        .to.emit(dapp, "GuardianInvitationAccepted")
+        .withArgs(ward.address, guardian.address)
+        .and.to.emit(dapp, "GuardianBound")
+        .withArgs(ward.address, guardian.address);
+      expect(await dapp.pendingGuardianInvites(ward.address)).to.equal(ethers.ZeroAddress);
+      expect(await dapp.isWardGuardian(ward.address, guardian.address)).to.be.true;
+    });
+
+    it("被监护人可拒绝监护人邀请，且不会建立绑定关系", async function () {
+      const { dapp, ward, guardian } = await loadFixture(deployGuardianDAppFixture);
+      await dapp.connect(guardian).requestGuardianshipInvite(ward.address);
+
+      await expect(dapp.connect(ward).rejectGuardianInvitation())
+        .to.emit(dapp, "GuardianInvitationRejected")
+        .withArgs(ward.address, guardian.address);
+      expect(await dapp.pendingGuardianInvites(ward.address)).to.equal(ethers.ZeroAddress);
+      expect(await dapp.isWardGuardian(ward.address, guardian.address)).to.be.false;
+    });
+
+    it("没有收到监护人邀请时不能确认或拒绝", async function () {
+      const { dapp, ward } = await loadFixture(deployGuardianDAppFixture);
+      await expect(dapp.connect(ward).acceptGuardianInvitation())
+        .to.be.revertedWithCustomError(dapp, "NoPendingRequestForYou");
+      await expect(dapp.connect(ward).rejectGuardianInvitation())
+        .to.be.revertedWithCustomError(dapp, "NoPendingRequestForYou");
+    });
+
     it("管理员直接绑定：Owner 可通过 bindGuardian 绑定，非 Owner 调用回滚", async function () {
       const { dapp, owner, ward, guardian, guardian2, stranger } = await loadFixture(deployGuardianDAppFixture);
       // Owner 调用成功
@@ -243,32 +280,33 @@ describe("GuardianDApp 智能合约综合测试套件", function () {
       ).to.be.revertedWithCustomError(dapp, "NotAuthorizedGuardian");
     });
 
-    it("Owner 与监护人可管理黑名单商户 (setBannedMerchant)", async function () {
-      const { dapp, owner, ward, guardian } = await loadFixture(deployGuardianDAppFixture);
+    it("Owner 与绑定监护人可管理其被监护人的黑名单商户", async function () {
+      const { dapp, owner, ward, guardian, guardian2 } = await loadFixture(deployGuardianDAppFixture);
       await dapp.connect(owner).bindGuardian(ward.address, guardian.address);
 
       // Owner 标记黑名单
-      await expect(dapp.connect(owner).setBannedMerchant("Casino", true))
+      await expect(dapp.connect(owner).setBannedMerchant(ward.address, "Casino", true))
         .to.emit(dapp, "BannedMerchantSet")
-        .withArgs("Casino", true);
-      expect(await dapp.bannedMerchants("Casino")).to.be.true;
+        .withArgs(ward.address, "Casino", true);
+      expect(await dapp.bannedMerchants(ward.address, "Casino")).to.be.true;
 
       // 监护人标记黑名单
-      await expect(dapp.connect(guardian).setBannedMerchant("Nightclub", true))
+      await expect(dapp.connect(guardian).setBannedMerchant(ward.address, "Nightclub", true))
         .to.emit(dapp, "BannedMerchantSet")
-        .withArgs("Nightclub", true);
-      expect(await dapp.bannedMerchants("Nightclub")).to.be.true;
+        .withArgs(ward.address, "Nightclub", true);
+      expect(await dapp.bannedMerchants(ward.address, "Nightclub")).to.be.true;
+      expect(await dapp.bannedMerchants(guardian2.address, "Nightclub")).to.be.false;
     });
 
     it("普通用户/第三方设置黑名单商户应被拦截回滚 (OnlyOwnerOrGuardian)", async function () {
       const { dapp, ward, stranger } = await loadFixture(deployGuardianDAppFixture);
       await expect(
-        dapp.connect(ward).setBannedMerchant("GameStore", true)
-      ).to.be.revertedWithCustomError(dapp, "OnlyOwnerOrGuardian");
+        dapp.connect(ward).setBannedMerchant(ward.address, "GameStore", true)
+      ).to.be.revertedWithCustomError(dapp, "NotAuthorizedGuardian");
 
       await expect(
-        dapp.connect(stranger).setBannedMerchant("GameStore", true)
-      ).to.be.revertedWithCustomError(dapp, "OnlyOwnerOrGuardian");
+        dapp.connect(stranger).setBannedMerchant(ward.address, "GameStore", true)
+      ).to.be.revertedWithCustomError(dapp, "NotAuthorizedGuardian");
     });
   });
 
@@ -354,7 +392,7 @@ describe("GuardianDApp 智能合约综合测试套件", function () {
 
     it("商户处于黑名单中：即使未超阈值也强制进入待审批", async function () {
       const { dapp, owner, oracle, ward } = await loadFixture(boundWardFixture);
-      await dapp.connect(owner).setBannedMerchant("Gambling", true);
+      await dapp.connect(owner).setBannedMerchant(ward.address, "Gambling", true);
 
       // 金额 30 ETH 低于阈值 100 ETH，但属于黑名单商户
       const amount = ethers.parseEther("30");
@@ -568,6 +606,39 @@ describe("GuardianDApp 智能合约综合测试套件", function () {
   // 9. 多对多监护关系拓扑 (M:N Guardianship Topologies)
   // =========================================================================
   describe("9. 多对多监护人关系拓扑与跨被监护人治理", function () {
+    it("可设置两人通过门槛，并在两名不同监护人同意后才批准消费", async function () {
+      const { dapp, owner, oracle, ward, guardian, guardian2 } = await loadFixture(deployGuardianDAppFixture);
+      await dapp.connect(owner).bindGuardian(ward.address, guardian.address);
+      await dapp.connect(owner).bindGuardian(ward.address, guardian2.address);
+      await dapp.connect(guardian).setApprovalRequirement(ward.address, 2);
+      await dapp.connect(ward).setThreshold(ethers.parseEther("100"));
+      await dapp.connect(oracle).recordPayment(ward.address, ethers.parseEther("300"), "Books");
+
+      await expect(dapp.connect(guardian).confirmTransaction(1, true))
+        .to.emit(dapp, "TransactionApprovalRecorded")
+        .withArgs(1n, guardian.address, 1n, 2n);
+      let txn = await dapp.transactions(1);
+      expect(txn.isPending).to.be.true;
+      expect(txn.isApproved).to.be.false;
+      expect(await dapp.getTransactionApprovalStatus(1)).to.deep.equal([2n, 1n]);
+
+      await expect(dapp.connect(guardian).confirmTransaction(1, true))
+        .to.be.revertedWithCustomError(dapp, "GuardianAlreadyApproved");
+      await dapp.connect(guardian2).confirmTransaction(1, true);
+      txn = await dapp.transactions(1);
+      expect(txn.isPending).to.be.false;
+      expect(txn.isApproved).to.be.true;
+    });
+
+    it("审批门槛不能为零或超过已绑定监护人数", async function () {
+      const { dapp, owner, ward, guardian } = await loadFixture(deployGuardianDAppFixture);
+      await dapp.connect(owner).bindGuardian(ward.address, guardian.address);
+      await expect(dapp.connect(guardian).setApprovalRequirement(ward.address, 0))
+        .to.be.revertedWithCustomError(dapp, "InvalidApprovalRequirement");
+      await expect(dapp.connect(guardian).setApprovalRequirement(ward.address, 2))
+        .to.be.revertedWithCustomError(dapp, "InvalidApprovalRequirement");
+    });
+
     it("支持一个被监护人绑定多个监护人，任一监护人均可独立完成待审批", async function () {
       const { dapp, owner, oracle, ward, guardian, guardian2 } = await loadFixture(deployGuardianDAppFixture);
       // 绑定两个监护人

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ethers } from 'ethers';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import { Shield, User, UserPlus, Users, Clock, AlertTriangle, QrCode, ShoppingBag } from 'lucide-react';
+import { Shield, User, UserCheck, UserPlus, Users, Clock, AlertTriangle, QrCode, ShoppingBag } from 'lucide-react';
 import { Navbar } from './components/layout/Navbar';
 import { PendingList } from './components/PendingList';
 import { LoginPage } from './components/Login/LoginPage';
@@ -69,10 +69,13 @@ function App() {
   const [guardianInfo, setGuardianInfo] = useState(null);
   const [guardianInfos, setGuardianInfos] = useState([]);
   const [pendingGuardianInfo, setPendingGuardianInfo] = useState(null);
+  const [pendingGuardianInvitationInfo, setPendingGuardianInvitationInfo] = useState(null);
   const [activeWards, setActiveWards] = useState([]);
   const [myThreshold, setMyThreshold] = useState("0");
   const [editingThreshold, setEditingThreshold] = useState(null);
   const [isUpdatingThreshold, setIsUpdatingThreshold] = useState(false);
+  const [editingApprovalRequirement, setEditingApprovalRequirement] = useState(null);
+  const [isUpdatingApprovalRequirement, setIsUpdatingApprovalRequirement] = useState(false);
 
   // 仿真扫码状态
   const [showScanModal, setShowScanModal] = useState(false);
@@ -117,6 +120,7 @@ function App() {
 
   const connectWallet = (bankAccount) => {
     setAccount(bankAccount.address);
+    setRole(bankAccount.role || 'user');
     setIsLoggedIn(true);
   };
 
@@ -125,9 +129,11 @@ function App() {
     logoutLocalBank();
     setIsLoggedIn(false);
     setAccount(null);
+    setRole(null);
     setGuardianInfo(null);
     setGuardianInfos([]);
     setPendingGuardianInfo(null);
+    setPendingGuardianInvitationInfo(null);
     setActiveWards([]);
     setSelectedWardFilter('all');
   };
@@ -238,10 +244,14 @@ function App() {
     try {
       ids = await contract.getPendingTransactions(account);
       txDetails = await Promise.all(ids.map(id => contract.transactions(id)));
-      setPendingTxs(txDetails.map(d => ({
-        id: d[0], ward: d[1], amount: d[2].toString(), 
-        timestamp: d[3], merchantType: d[4], isPending: d[5]
-      })));
+      const pendingWithApprovalStatus = await Promise.all(txDetails.map(async d => {
+        const [requiredApprovals, approvals] = await contract.getTransactionApprovalStatus(d[0]).catch(() => [1n, 0n]);
+        return {
+          id: d[0], ward: d[1], amount: d[2].toString(), timestamp: d[3], merchantType: d[4], isPending: d[5],
+          requiredApprovals: requiredApprovals.toString(), approvals: approvals.toString()
+        };
+      }));
+      setPendingTxs(pendingWithApprovalStatus);
     } catch (e) {
       console.warn("Error fetching pending transactions:", e);
     }
@@ -272,11 +282,12 @@ function App() {
         try {
           const isG = await contract.isWardGuardian(accInfo.address, account);
           if (isG) {
-            const [thres, frozen] = await Promise.all([
+            const [thres, frozen, requiredApprovals] = await Promise.all([
               contract.threshold(accInfo.address).catch(() => "800"),
-              contract.isFrozen(accInfo.address).catch(() => false)
+              contract.isFrozen(accInfo.address).catch(() => false),
+              contract.getApprovalRequirement(accInfo.address).catch(() => 1)
             ]);
-            return { ...accInfo, threshold: thres.toString(), isFrozen: frozen };
+            return { ...accInfo, threshold: thres.toString(), isFrozen: frozen, requiredApprovals: requiredApprovals.toString() };
           }
         } catch (e) {}
         return null;
@@ -303,12 +314,14 @@ function App() {
 
     // 4. 被监护人信息：查询当前用户的监护人和申请中的监护人 (并行读取优化)
     try {
-      const [guardiansListRes, reqGuardianRes] = await Promise.all([
+      const [guardiansListRes, reqGuardianRes, invitationGuardianRes] = await Promise.all([
         contract.getWardGuardians(account).catch(() => []),
-        contract.pendingWardToGuardian(account).catch(() => zeroAddr)
+        contract.pendingWardToGuardian(account).catch(() => zeroAddr),
+        contract.pendingGuardianInvites(account).catch(() => zeroAddr)
       ]);
       const activeGuardians = guardiansListRes || [];
       const reqGuardian = reqGuardianRes || zeroAddr;
+      const invitationGuardian = invitationGuardianRes || zeroAddr;
 
       if (activeGuardians && activeGuardians.length > 0) {
         const guardianInfosList = [];
@@ -330,19 +343,27 @@ function App() {
       } else {
         setPendingGuardianInfo(null);
       }
+
+      if (invitationGuardian && invitationGuardian !== zeroAddr) {
+        const info = allAccounts.find(a => a.address.toLowerCase() === invitationGuardian.toLowerCase());
+        setPendingGuardianInvitationInfo(info || { address: invitationGuardian, accountName: "邀请中的监护人" });
+      } else {
+        setPendingGuardianInvitationInfo(null);
+      }
     } catch (e) {
       console.error("Query ward status error:", e);
     }
 
     // 5. 角色判定
-    let resolvedRole = 'ward';
+    let resolvedRole = 'user';
     if (currentUser.role === 'merchant') {
       resolvedRole = 'merchant';
     } else {
       const hasWards = wardsList.length > 0;
       const isGuardianOnChain = ids.length > 0 || txDetails.length > 0 || requests.length > 0 || hasWards;
       const isGuardian = isGuardianOnChain || currentUser.role === 'guardian';
-      resolvedRole = isGuardian ? 'guardian' : 'ward';
+      const isWard = guardianInfos.length > 0 || pendingGuardianInfo !== null || pendingGuardianInvitationInfo !== null || currentUser.role === 'ward';
+      resolvedRole = isGuardian ? 'guardian' : (isWard ? 'ward' : 'user');
     }
     setRole(resolvedRole);
 
@@ -415,12 +436,35 @@ function App() {
       const tx = await contract.confirmTransaction(txId, approve);
       toast.info("交易已提交，等待上链确认...");
       await tx.wait();
-      toast.success(approve ? "已批准消费请求" : "已拒绝消费请求");
+      toast.success(approve ? "已记录审批意见" : "已拒绝消费请求");
       fetchData();
     } catch (err) {
       toast.error(err.reason || "交易执行失败");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleUpdateApprovalRequirement = async (wardAddress, requiredApprovals) => {
+    const value = Number(requiredApprovals);
+    const ward = activeWards.find(item => item.address === wardAddress);
+    if (!Number.isInteger(value) || value < 1 || !ward || value > (await (await getContract()).getWardGuardians(wardAddress)).length) {
+      toast.error("审批人数须在 1 到已绑定监护人数之间");
+      return;
+    }
+    setIsUpdatingApprovalRequirement(true);
+    try {
+      const contract = await getContract();
+      const tx = await contract.setApprovalRequirement(wardAddress, value);
+      toast.info("正在保存审批人数设置...");
+      await tx.wait();
+      toast.success(`已设为 ${value} 位监护人同意后通过`);
+      setEditingApprovalRequirement(null);
+      fetchData();
+    } catch (err) {
+      toast.error(err.reason || "设置审批人数失败");
+    } finally {
+      setIsUpdatingApprovalRequirement(false);
     }
   };
 
@@ -451,6 +495,41 @@ function App() {
       fetchData();
     } catch (err) {
       toast.error("操作失败，请重试");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 被监护人确认或拒绝监护人主动发出的邀请
+  const handleGuardianInvitationAction = async (approve) => {
+    setLoading(true);
+    try {
+      const contract = await getContract();
+      const guardianAddress = await contract.pendingGuardianInvites(account);
+      const tx = approve
+        ? await contract.acceptGuardianInvitation()
+        : await contract.rejectGuardianInvitation();
+
+      toast.info("正在上链同步绑定关系...");
+      await tx.wait();
+
+      if (approve) {
+        try {
+          await authenticatedFetch('/api/guardian/bind', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ wardAddress: account, guardianAddress })
+          });
+        } catch (err) {
+          console.error("写入数据库失败:", err);
+        }
+      }
+
+      toast.success(approve ? "已同意监护邀请，绑定关系已生效" : "已拒绝监护邀请");
+      fetchData();
+    } catch (err) {
+      console.error(err);
+      toast.error(err.reason || "操作失败，请重试");
     } finally {
       setLoading(false);
     }
@@ -519,35 +598,26 @@ function App() {
       }
 
       const contract = await getContract();
-      const currentG = await contract.wardToGuardian(wardAcc.address);
-      if (currentG.toLowerCase() === account.toLowerCase()) {
+      const isAlreadyGuardian = await contract.isWardGuardian(wardAcc.address, account);
+      if (isAlreadyGuardian) {
         toast.error("该用户已经绑定您为监护人，无需重复添加");
         setIsAddingWard(false);
         return;
       }
 
-      toast.info("正在确认该成员已发送的绑定申请...");
+      toast.info("正在向该成员发送监护邀请...");
+      await fundAccount(account);
       const guardianContract = await getContract();
-      const tx2 = await guardianContract.acceptGuardianship(wardAcc.address);
+      const tx2 = await guardianContract.requestGuardianshipInvite(wardAcc.address);
       await tx2.wait();
 
-      try {
-        await authenticatedFetch('/api/guardian/bind', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ wardAddress: wardAcc.address, guardianAddress: account })
-        });
-      } catch (err) {
-        console.error("写入数据库失败:", err);
-      }
-
-      toast.success(`已成功添加并绑定被监护人 ${wardAcc.accountName}！`);
+      toast.success(`已向被监护人 ${wardAcc.accountName} 发出邀请，等待对方同意。`);
       setWardPhoneInput('');
       setShowAddWardForm(false);
       fetchData();
     } catch (err) {
       console.error(err);
-      toast.error(err.reason || "绑定失败，请确认该被监护人是否有足够的以太币");
+      toast.error(err.reason || "邀请发送失败，请检查区块链网络或邀请状态");
     } finally {
       setIsAddingWard(false);
     }
@@ -1056,8 +1126,7 @@ function App() {
 
   useEffect(() => {
     try {
-      if (window.require) {
-        const { ipcRenderer } = window.require('electron');
+      if (window.guardianElectron) {
         const handleAlipaySuccess = () => {
           handlePaymentSuccessRef.current();
         };
@@ -1065,12 +1134,12 @@ function App() {
           toast.error("❌ 支付宝支付校验失败。");
         };
 
-        ipcRenderer.on('alipay-success', handleAlipaySuccess);
-        ipcRenderer.on('alipay-failure', handleAlipayFailure);
+        const unsubscribeSuccess = window.guardianElectron.onAlipayStatus('alipay-success', handleAlipaySuccess);
+        const unsubscribeFailure = window.guardianElectron.onAlipayStatus('alipay-failure', handleAlipayFailure);
         
         return () => {
-          ipcRenderer.off('alipay-success', handleAlipaySuccess);
-          ipcRenderer.off('alipay-failure', handleAlipayFailure);
+          unsubscribeSuccess();
+          unsubscribeFailure();
         };
       }
     } catch (e) {
@@ -1211,7 +1280,7 @@ function App() {
                           className="w-full bg-slate-900/50 border border-slate-800 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 rounded-xl py-3 px-4 text-white text-sm outline-none transition-all duration-300"
                         />
                       </div>
-                      <p className="text-sm text-slate-400">系统将代表被监护人发送绑定请求，并由您立即自动确认，实现一键绑定。</p>
+                      <p className="text-sm text-slate-400">系统将向该成员发出监护邀请；对方同意后，绑定关系才会生效。</p>
                     </div>
                     <div className="flex justify-end space-x-2">
                       <button
@@ -1229,7 +1298,7 @@ function App() {
                         {isAddingWard ? (
                           <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                         ) : (
-                          <span>确认添加</span>
+                          <span>发送邀请</span>
                         )}
                       </button>
                     </div>
@@ -1255,6 +1324,7 @@ function App() {
                           <p className="text-slate-400 text-sm font-mono leading-none mb-1">{ward.phone}</p>
                           <p className="text-slate-400 text-xs tracking-wide font-mono truncate">{ward.address}</p>
                           <p className="text-blue-400 text-[11px] font-bold mt-1">当前消费阈值: {ward.threshold} 元</p>
+                          <p className="text-amber-400 text-[11px] font-bold mt-1">审批规则: {ward.requiredApprovals || 1} 位监护人同意后通过</p>
                         </div>
                         <div className="flex flex-col space-y-2 flex-shrink-0">
                           {editingThreshold?.address === ward.address ? (
@@ -1283,6 +1353,26 @@ function App() {
                               >
                                 修改阈值
                               </button>
+                              {editingApprovalRequirement?.address === ward.address ? (
+                                <div className="flex items-center space-x-2">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    className="w-14 bg-slate-950/40 border border-slate-850 rounded px-2 py-1 text-xs text-white outline-none focus:border-amber-500/50"
+                                    value={editingApprovalRequirement.value}
+                                    onChange={e => setEditingApprovalRequirement({ ...editingApprovalRequirement, value: e.target.value })}
+                                  />
+                                  <button onClick={() => handleUpdateApprovalRequirement(ward.address, editingApprovalRequirement.value)} disabled={isUpdatingApprovalRequirement} className="bg-amber-600 hover:bg-amber-500 text-white px-2 py-1 rounded text-xs">保存</button>
+                                  <button onClick={() => setEditingApprovalRequirement(null)} className="bg-slate-855 hover:bg-slate-800 text-slate-400 px-2 py-1 rounded text-xs">取消</button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setEditingApprovalRequirement({ address: ward.address, value: ward.requiredApprovals || 1 })}
+                                  className="px-3 py-1.5 border border-amber-500/20 hover:bg-amber-500/10 text-amber-400 rounded-xl text-xs font-bold transition-all duration-300 whitespace-nowrap"
+                                >
+                                  设置审批人数
+                                </button>
+                              )}
                               <button 
                                 disabled={freezingWard === ward.address}
                                 onClick={() => handleToggleFreeze(ward.address, ward.isFrozen)}
@@ -1456,6 +1546,37 @@ function App() {
                   <Shield className="w-5 h-5 text-emerald-400" />
                   <span>🛡️ 监护关系绑定管理</span>
                 </h4>
+
+                {pendingGuardianInvitationInfo && (
+                  <div className="mb-4 bg-blue-500/5 border border-blue-500/20 rounded-2xl p-5 flex items-center justify-between shadow-sm">
+                    <div className="flex items-center space-x-4">
+                      <div className="w-12 h-12 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center justify-center text-blue-400 flex-shrink-0">
+                        <UserCheck className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <p className="text-blue-400 text-xs font-bold">收到监护邀请</p>
+                        <p className="text-white font-bold text-base mt-0.5">{pendingGuardianInvitationInfo.accountName}</p>
+                        <p className="text-slate-400 text-xs font-mono">{pendingGuardianInvitationInfo.phone || pendingGuardianInvitationInfo.address}</p>
+                      </div>
+                    </div>
+                    <div className="flex space-x-2">
+                      <button
+                        disabled={loading}
+                        onClick={() => handleGuardianInvitationAction(true)}
+                        className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl text-xs font-bold disabled:opacity-50"
+                      >
+                        同意
+                      </button>
+                      <button
+                        disabled={loading}
+                        onClick={() => handleGuardianInvitationAction(false)}
+                        className="px-4 py-2 border border-slate-700 text-slate-400 rounded-xl text-xs font-bold disabled:opacity-50"
+                      >
+                        拒绝
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {guardianInfos.length > 0 ? (
                   <div className="space-y-4">

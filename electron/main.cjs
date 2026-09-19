@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow } = require('electron');
 const path = require('path');
 
 // 获取命令行参数中的 session 标识，默认为 default
@@ -12,8 +12,10 @@ function createWindow() {
     height: 700,
     title: `智能仿真银行 - 会话: ${sessionId}`,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.cjs'),
       // 核心：使用不同的 partition 来隔离本地存储 (localStorage)
       partition: `persist:${sessionId}`
     },
@@ -43,13 +45,5 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', function () {
   if (process.platform !== 'darwin') app.quit();
-});
-
-// 监听支付宝沙箱支付弹窗请求
-ipcMain.on('open-alipay-window', (event, payUrl) => {
-  console.log("Opening payUrl externally in default system browser:", payUrl);
-  shell.openExternal(payUrl).catch(err => {
-    console.error("Failed to open external URL:", err);
-  });
 });
 

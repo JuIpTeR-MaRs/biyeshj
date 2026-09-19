@@ -39,6 +39,7 @@ release/
 # Alipay Sandbox & Mock Server configuration/keys
 scripts/alipay_keys/
 mock-server/env
+mock-server/local-ledger.json
 response.html
 
 # Playwright E2E

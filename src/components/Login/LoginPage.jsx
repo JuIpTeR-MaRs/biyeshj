@@ -1,25 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Plus, User, ArrowRight, Banknote, Smartphone, Lock, Eye, EyeOff, Users, UserCheck, Settings, Globe } from 'lucide-react';
+import { Shield, Plus, User, ArrowRight, Banknote, Smartphone, Lock, Eye, EyeOff, Settings, Globe } from 'lucide-react';
 import { 
   createLocalBankAccount, 
   getAllLocalAccounts, 
   registerToLocalBank, 
   maskCardNumber,
   verifyLogin,
-  findAccountByPhone
 } from '../../utils/bankAccount';
 import { toast } from 'react-toastify';
-import { getContract, fundAccount } from '../../utils/contract';
-import { getHostIp, isNative } from '../../utils/api';
-import { loginAdminApi } from '../../utils/authenticatedFetch';
+import { getApiUrl, getHostIp, isNative } from '../../utils/api';
+import { clearApiSession, loginAdminApi } from '../../utils/authenticatedFetch';
 
 export const LoginPage = ({ onLogin }) => {
   const [accounts, setAccounts] = useState([]);
   const [loginMode, setLoginMode] = useState('phone'); // 'phone', 'register', 'quick', 'admin'
   const [phone, setPhone] = useState('');
+  const [accountName, setAccountName] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('ward'); // 'ward' or 'guardian'
-  const [guardianPhone, setGuardianPhone] = useState('');
+  const [adminPhone, setAdminPhone] = useState('13800138000');
+  const [smsCode, setSmsCode] = useState('');
+  const [mockSmsCode, setMockSmsCode] = useState('');
+  const [role, setRole] = useState('user'); // 新注册账户先是普通用户，关系建立后动态判定
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showIpModal, setShowIpModal] = useState(false);
@@ -50,7 +51,7 @@ export const LoginPage = ({ onLogin }) => {
     setTimeout(async () => {
       if (phone === 'admin') {
         try {
-          await loginAdminApi(password);
+          await loginAdminApi(password, adminPhone, smsCode);
         } catch (error) {
           toast.error(error.message);
           setIsLoading(false);
@@ -61,6 +62,7 @@ export const LoginPage = ({ onLogin }) => {
       } else {
         const user = verifyLogin(phone, password);
         if (user) {
+          clearApiSession();
           registerToLocalBank(user);
           toast.success("安全认证成功");
           onLogin(user);
@@ -72,48 +74,34 @@ export const LoginPage = ({ onLogin }) => {
     }, 1000);
   };
 
+  const handleSendAdminSms = async () => {
+    try {
+      const response = await fetch(getApiUrl('/api/auth/admin/sms'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: adminPhone })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '验证码发送失败');
+      setMockSmsCode(data.mockCode || '');
+      toast.success('模拟短信验证码已发送；请查看下方演示码或后端控制台');
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+
   const handleRegister = async (e) => {
     e.preventDefault();
-    if (!phone || !password) {
+    if (!phone || !password || !accountName.trim()) {
       toast.error("请填写完整注册信息");
       return;
     }
     
-    if (role === 'ward' && !guardianPhone) {
-      toast.error("被监护人必须指定一名监护人手机号");
-      return;
-    }
-
     setIsLoading(true);
     try {
       // 1. 创建本地账户
-      const newAccount = createLocalBankAccount(phone, password);
-      
-      // 2. 如果是被监护人，尝试在链上发起请求
-      if (role === 'ward') {
-        const guardianAcc = findAccountByPhone(guardianPhone);
-        if (!guardianAcc) {
-          toast.error("未找到指定的监护人手机号，请确保监护人已注册");
-          setIsLoading(false);
-          return;
-        }
-        
-        // 实际链上操作：发送绑定请求
-        try {
-          await fundAccount(newAccount.address);
-          const contract = await getContract(newAccount.privateKey);
-          const tx = await contract.requestGuardian(guardianAcc.address);
-          toast.info("正在提交区块链绑定请求...");
-          await tx.wait();
-
-          toast.success(`绑定申请已发送给监护人 ${guardianPhone}，等待对方登录确认。`);
-        } catch (chainErr) {
-          console.error("Chain Error:", chainErr);
-          toast.error("区块链绑定请求失败，请检查网络");
-        }
-      }
+      const newAccount = createLocalBankAccount(phone, password, accountName);
 
       newAccount.role = role;
+      clearApiSession();
       registerToLocalBank(newAccount);
       toast.success("注册成功！");
       onLogin(newAccount);
@@ -130,6 +118,7 @@ export const LoginPage = ({ onLogin }) => {
       toast.error("快捷账户解锁失败");
       return;
     }
+    clearApiSession();
     registerToLocalBank(unlocked);
     onLogin(unlocked);
   };
@@ -250,6 +239,17 @@ export const LoginPage = ({ onLogin }) => {
                     </button>
                   </div>
                 </div>
+                {phone === 'admin' && (
+                  <div className="space-y-3 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-3">
+                    <p className="text-xs font-bold text-indigo-300">管理员二次验证（模拟短信）</p>
+                    <input type="tel" placeholder="管理员手机号" value={adminPhone} onChange={(e) => setAdminPhone(e.target.value)} className="w-full bg-slate-950/40 border border-slate-800/80 rounded-xl py-2.5 px-3 text-slate-200 text-sm outline-none" />
+                    <div className="flex gap-2">
+                      <input type="text" inputMode="numeric" maxLength={6} placeholder="6 位验证码" value={smsCode} onChange={(e) => setSmsCode(e.target.value.replace(/\D/g, ''))} className="min-w-0 flex-1 bg-slate-950/40 border border-slate-800/80 rounded-xl py-2.5 px-3 text-slate-200 text-sm outline-none" />
+                      <button type="button" onClick={handleSendAdminSms} className="shrink-0 rounded-xl border border-indigo-500/40 px-3 text-xs font-bold text-indigo-300 hover:bg-indigo-500/10">获取验证码</button>
+                    </div>
+                    {mockSmsCode && <p className="text-xs text-amber-300">演示验证码：{mockSmsCode}（开发环境可见）</p>}
+                  </div>
+                )}
                 <button disabled={isLoading} className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:from-indigo-700 disabled:to-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-500/10 hover:shadow-indigo-500/20 transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center space-x-2 mt-6">
                   {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <><span>进入系统</span><ArrowRight className="w-4 h-4" /></>}
                 </button>
@@ -258,33 +258,11 @@ export const LoginPage = ({ onLogin }) => {
 
             {loginMode === 'register' && (
               <form onSubmit={handleRegister} className="space-y-4 animate-in slide-in-from-right-4 duration-300">
-                <div className="grid grid-cols-3 gap-2 mb-2">
-                  <button 
-                    type="button" 
-                    onClick={() => setRole('ward')} 
-                    className={`flex flex-col items-center justify-center p-2 rounded-2xl border transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] ${
-                      role === 'ward' 
-                        ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 shadow-md shadow-emerald-500/5' 
-                        : 'bg-slate-950/40 border-slate-800 text-slate-500 hover:text-slate-300'
-                    }`}
-                  >
-                    <Users className="w-4 h-4 mb-1" /> <span className="text-[10px] font-black">被监护人</span>
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={() => setRole('guardian')} 
-                    className={`flex flex-col items-center justify-center p-2 rounded-2xl border transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] ${
-                      role === 'guardian' 
-                        ? 'bg-blue-500/10 border-blue-500 text-blue-400 shadow-md shadow-blue-500/5' 
-                        : 'bg-slate-950/40 border-slate-800 text-slate-500 hover:text-slate-300'
-                    }`}
-                  >
-                    <UserCheck className="w-4 h-4 mb-1" /> <span className="text-[10px] font-black">监护人</span>
-                  </button>
+                <div className="flex justify-end mb-2">
                   <button 
                     type="button" 
                     onClick={() => setRole('merchant')} 
-                    className={`flex flex-col items-center justify-center p-2 rounded-2xl border transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] ${
+                    className={`flex items-center space-x-2 px-3 py-2 rounded-xl border transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] ${
                       role === 'merchant' 
                         ? 'bg-amber-500/10 border-amber-500 text-amber-400 shadow-md shadow-amber-500/5' 
                         : 'bg-slate-950/40 border-slate-800 text-slate-500 hover:text-slate-300'
@@ -296,6 +274,17 @@ export const LoginPage = ({ onLogin }) => {
 
                 <div className="space-y-3">
                   <div className="relative">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="姓名 / 用户昵称"
+                      value={accountName}
+                      onChange={(e) => setAccountName(e.target.value)}
+                      maxLength={30}
+                      className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-indigo-500/50 rounded-2xl py-3.5 pl-11 pr-4 text-slate-200 text-sm outline-none transition-all duration-300"
+                    />
+                  </div>
+                  <div className="relative">
                     <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                     <input type="text" placeholder="注册手机号" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-indigo-500/50 rounded-2xl py-3.5 pl-11 pr-4 text-slate-200 text-sm outline-none transition-all duration-300" />
                   </div>
@@ -303,15 +292,6 @@ export const LoginPage = ({ onLogin }) => {
                     <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                     <input type="password" placeholder="设置密码" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-indigo-500/50 rounded-2xl py-3.5 pl-11 pr-4 text-slate-200 text-sm outline-none transition-all duration-300" />
                   </div>
-                  {role === 'ward' && (
-                    <div className="space-y-1.5 animate-in slide-in-from-top-2 duration-300">
-                      <label className="text-[10px] font-bold text-amber-500 uppercase tracking-widest px-1">需要监护人同意</label>
-                      <div className="relative">
-                        <UserCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500/50" />
-                        <input type="text" placeholder="监护人手机号" value={guardianPhone} onChange={(e) => setGuardianPhone(e.target.value)} className="w-full bg-amber-500/5 border border-amber-500/20 rounded-2xl py-3.5 pl-11 pr-4 text-slate-200 text-sm outline-none focus:border-amber-500/50 transition-all duration-300" />
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <button disabled={isLoading} className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-600/10 hover:shadow-indigo-600/20 transition-all duration-300 transform active:scale-[0.98] mt-4">

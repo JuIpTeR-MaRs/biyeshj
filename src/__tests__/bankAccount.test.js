@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { ethers } from 'ethers';
 import { getActivePrivateKey, logoutLocalBank, registerToLocalBank, seedTestAccount, verifyLogin } from '../utils/bankAccount';
 
 describe('bankAccount secure local storage', () => {
@@ -32,4 +33,35 @@ describe('bankAccount secure local storage', () => {
     seedTestAccount();
     expect(localStorage.getItem('bank_current_user')).toBeNull();
   });
+
+  it('migrates a stale demo merchant keystore so quick login remains available', () => {
+    localStorage.setItem('bank_all_accounts', JSON.stringify([{
+      phone: '13900000000',
+      address: '0x90F79bf6eb2c4f870365E785982E1f101E93b906',
+      keystore: 'stale-demo-keystore'
+    }]));
+
+    seedTestAccount();
+
+    const merchant = verifyLogin('13900000000', '123');
+    expect(merchant).not.toBeNull();
+    expect(merchant.role).toBe('merchant');
+    expect(ethers.isAddress(merchant.address)).toBe(true);
+    expect(merchant.address).toBe('0x90F79bf6EB2c4f870365E785982E1f101E93b906');
+  });
+
+  it('repairs a previously migrated merchant account when its cached keystore belongs to another wallet', () => {
+    localStorage.setItem('bank_all_accounts', JSON.stringify([{
+      phone: '13900000000',
+      address: '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
+      keystore: JSON.stringify({ invalid: 'legacy merchant wallet' }),
+      demoCredentialVersion: 1
+    }]));
+
+    seedTestAccount();
+
+    expect(verifyLogin('13900000000', '123')?.address)
+      .toBe('0x90F79bf6EB2c4f870365E785982E1f101E93b906');
+  });
+
 });

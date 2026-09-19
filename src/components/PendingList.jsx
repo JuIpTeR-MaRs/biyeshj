@@ -30,6 +30,9 @@ export const PendingList = ({ txs, onAction, loading }) => (
                   <span className="text-slate-600">•</span>
                   <span className="text-slate-400">成员: {tx.ward.slice(0, 8)}...</span>
                 </div>
+                <p className="text-amber-400 text-xs font-bold mt-2">
+                  已同意 {tx.approvals || 0}/{tx.requiredApprovals || 1} 位监护人
+                </p>
               </div>
               <div className="flex space-x-2">
                 <button 

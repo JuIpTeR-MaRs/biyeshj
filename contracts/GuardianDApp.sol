@@ -38,6 +38,10 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     error NotPendingTransaction();
     /// @dev 账户已被冻结时抛出
     error AccountIsFrozen();
+    /// @dev 审批人数必须介于 1 和当前监护人数之间
+    error InvalidApprovalRequirement();
+    /// @dev 同一监护人不能对同一笔交易重复投赞成票
+    error GuardianAlreadyApproved();
 
     // --- 状态变量 ---
 
@@ -82,9 +86,16 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     /// @dev 记录当前未决的监护人绑定请求
     mapping(address => address) public pendingWardToGuardian;
 
+    /// @notice 被监护人地址 => 发出邀请的监护人地址
+    /// @dev 监护人主动添加成员时创建，由被监护人确认或拒绝
+    mapping(address => address) public pendingGuardianInvites;
+
     /// @notice 被监护人地址 => 消费预警阈值
     /// @dev 单笔消费超过此阈值将触发审批流
     mapping(address => uint256) public threshold;
+
+    /// @notice 被监护人地址 => 消费通过所需的监护人赞成票数量（未设置时默认为 1）
+    mapping(address => uint256) public approvalRequirement;
     
     /// @notice 交易 ID => 交易详情
     /// @dev 交易注册表，记录全网所有交易状态
@@ -92,7 +103,8 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
 
     /// @notice 商户黑名单映射
     /// @dev 属于黑名单的商户类型消费无论金额大小强制进入待审批
-    mapping(string => bool) public bannedMerchants;
+    /// @dev 被监护人地址 => 商户类别 => 是否限制；每个家庭独立配置。
+    mapping(address => mapping(string => bool)) public bannedMerchants;
 
     /// @notice 活跃监护人映射 (用于权限校验)
     /// @dev 标记某个地址是否至少是一个被监护人的监护人
@@ -107,6 +119,13 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
 
     /// @notice 被监护人地址 => 交易 ID 列表
     mapping(address => uint256[]) public wardTransactions;
+
+    /// @notice 交易创建时冻结的所需赞成票数量，避免后续改配置影响在途订单
+    mapping(uint256 => uint256) public transactionRequiredApprovals;
+    /// @notice 交易当前已获得的赞成票数量
+    mapping(uint256 => uint256) public transactionApprovalCounts;
+    /// @notice 交易 ID => 监护人 => 是否已经投过赞成票
+    mapping(uint256 => mapping(address => bool)) public transactionGuardianApproved;
 
     // --- 事件 ---
 
@@ -128,12 +147,19 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     event GuardianshipAccepted(address indexed ward, address indexed guardian);
     /// @notice 监护人拒绝绑定请求时触发
     event GuardianshipRejected(address indexed ward, address indexed guardian);
+    event GuardianInvitationRequested(address indexed ward, address indexed guardian);
+    event GuardianInvitationAccepted(address indexed ward, address indexed guardian);
+    event GuardianInvitationRejected(address indexed ward, address indexed guardian);
     /// @notice 商户黑名单状态改变时触发
-    event BannedMerchantSet(string merchantType, bool banned);
+    event BannedMerchantSet(address indexed ward, string merchantType, bool banned);
     /// @notice AI 审计报告哈希存证成功时触发
     event AiReportHashStored(address indexed ward, string month, bytes32 reportHash);
     /// @notice 账户被冻结/解冻时触发
     event AccountFrozen(address indexed account, bool frozen, address indexed operator);
+    /// @notice 多监护人审批所需赞成票数量更新
+    event ApprovalRequirementSet(address indexed ward, uint256 requiredApprovals, address indexed operator);
+    /// @notice 某位监护人的赞成票已被记录，但订单尚未达到通过门槛
+    event TransactionApprovalRecorded(uint256 indexed txId, address indexed guardian, uint256 approvals, uint256 requiredApprovals);
 
     // --- 修饰符 ---
 
@@ -220,6 +246,48 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice 监护人主动邀请被监护人建立绑定关系
+     * @param _ward 待邀请的被监护人地址
+     */
+    function requestGuardianshipInvite(address _ward) external nonReentrant {
+        if (_ward == address(0)) revert InvalidAddress();
+        if (msg.sender == _ward) revert CannotBeOwnGuardian();
+        if (pendingGuardianInvites[_ward] == msg.sender || isWardGuardian[_ward][msg.sender]) revert AlreadyRequested();
+
+        pendingGuardianInvites[_ward] = msg.sender;
+        emit GuardianInvitationRequested(_ward, msg.sender);
+    }
+
+    /**
+     * @notice 被监护人接受监护人主动发出的绑定邀请
+     */
+    function acceptGuardianInvitation() external nonReentrant {
+        address guardian = pendingGuardianInvites[msg.sender];
+        if (guardian == address(0)) revert NoPendingRequestForYou();
+
+        if (!isWardGuardian[msg.sender][guardian]) {
+            wardGuardiansList[msg.sender].push(guardian);
+            isWardGuardian[msg.sender][guardian] = true;
+        }
+        isGuardian[guardian] = true;
+        delete pendingGuardianInvites[msg.sender];
+
+        emit GuardianInvitationAccepted(msg.sender, guardian);
+        emit GuardianBound(msg.sender, guardian);
+    }
+
+    /**
+     * @notice 被监护人拒绝监护人主动发出的绑定邀请
+     */
+    function rejectGuardianInvitation() external nonReentrant {
+        address guardian = pendingGuardianInvites[msg.sender];
+        if (guardian == address(0)) revert NoPendingRequestForYou();
+
+        delete pendingGuardianInvites[msg.sender];
+        emit GuardianInvitationRejected(msg.sender, guardian);
+    }
+
+    /**
      * @notice 管理员手动绑定（保留用于初始化）
      * @param _ward 被监护人地址
      * @param _guardian 监护人地址
@@ -251,6 +319,27 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         if (!isWardGuardian[_ward][msg.sender]) revert NotAuthorizedGuardian();
         threshold[_ward] = _amount;
         emit ThresholdSet(_ward, _amount);
+    }
+
+    /**
+     * @notice 设置该被监护人单笔受限消费所需的监护人赞成票数量
+     * @dev 被监护人本人或其任一已绑定监护人可设置；数量不能超过已绑定监护人数
+     */
+    function setApprovalRequirement(address _ward, uint256 _requiredApprovals) external {
+        if (msg.sender != _ward && !isWardGuardian[_ward][msg.sender]) revert NotAuthorizedGuardian();
+        if (_requiredApprovals == 0 || _requiredApprovals > wardGuardiansList[_ward].length) {
+            revert InvalidApprovalRequirement();
+        }
+        approvalRequirement[_ward] = _requiredApprovals;
+        emit ApprovalRequirementSet(_ward, _requiredApprovals, msg.sender);
+    }
+
+    /**
+     * @notice 获取生效中的审批门槛；兼容历史数据，未配置时默认为一人通过
+     */
+    function getApprovalRequirement(address _ward) external view returns (uint256) {
+        uint256 configured = approvalRequirement[_ward];
+        return configured == 0 ? 1 : configured;
     }
 
     /**
@@ -299,7 +388,7 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         uint256 currentThreshold = threshold[_ward];
         
         // 核心逻辑：商户黑名单拦截，或者金额超过阈值，并且已经绑定了监护人，则进入 Pending
-        bool isBanned = bannedMerchants[_merchantType];
+        bool isBanned = bannedMerchants[_ward][_merchantType];
         bool isPending = (isBanned || (_amount > currentThreshold)) && (wardGuardiansList[_ward].length > 0);
 
         transactions[txCounter] = Transaction({
@@ -312,6 +401,8 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
             isApproved: !isPending,
             isPaid: !isPending
         });
+        uint256 configuredRequirement = approvalRequirement[_ward];
+        transactionRequiredApprovals[txCounter] = configuredRequirement == 0 ? 1 : configuredRequirement;
 
         // 记录被监护人的交易 ID
         wardTransactions[_ward].push(txCounter);
@@ -324,14 +415,16 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice 设置商户黑名单
+     * @notice 设置指定被监护人的商户黑名单
+     * @param _ward 被监护人地址
      * @param _merchantType 商户类型
      * @param _banned 是否加入黑名单
      */
-    function setBannedMerchant(string calldata _merchantType, bool _banned) external {
-        if (msg.sender != owner() && !isGuardian[msg.sender]) revert OnlyOwnerOrGuardian();
-        bannedMerchants[_merchantType] = _banned;
-        emit BannedMerchantSet(_merchantType, _banned);
+    function setBannedMerchant(address _ward, string calldata _merchantType, bool _banned) external {
+        if (_ward == address(0)) revert InvalidAddress();
+        if (msg.sender != owner() && !isWardGuardian[_ward][msg.sender]) revert NotAuthorizedGuardian();
+        bannedMerchants[_ward][_merchantType] = _banned;
+        emit BannedMerchantSet(_ward, _merchantType, _banned);
     }
 
     /**
@@ -361,14 +454,33 @@ contract GuardianDApp is Ownable, ReentrancyGuard {
         if (!txn.isPending) revert NotPendingTransaction();
         if (!isWardGuardian[txn.ward][msg.sender]) revert NotAuthorizedGuardian();
 
-        txn.isPending = false;
-        txn.isApproved = _approve;
-
         if (_approve) {
-            emit TransactionConfirmed(_txId, msg.sender);
+            if (transactionGuardianApproved[_txId][msg.sender]) revert GuardianAlreadyApproved();
+            transactionGuardianApproved[_txId][msg.sender] = true;
+            uint256 approvals = ++transactionApprovalCounts[_txId];
+            uint256 requiredApprovals = transactionRequiredApprovals[_txId];
+            if (approvals >= requiredApprovals) {
+                txn.isPending = false;
+                txn.isApproved = true;
+                emit TransactionConfirmed(_txId, msg.sender);
+            } else {
+                emit TransactionApprovalRecorded(_txId, msg.sender, approvals, requiredApprovals);
+            }
         } else {
+            // 拒绝维持现有语义：任一监护人可一票否决。
+            txn.isPending = false;
+            txn.isApproved = false;
             emit TransactionRejected(_txId, msg.sender);
         }
+    }
+
+    /**
+     * @notice 获取订单的多监护人审批进度
+     */
+    function getTransactionApprovalStatus(uint256 _txId) external view returns (uint256 requiredApprovals, uint256 approvals) {
+        if (transactions[_txId].id == 0) revert TransactionNotFound();
+        requiredApprovals = transactionRequiredApprovals[_txId];
+        approvals = transactionApprovalCounts[_txId];
     }
 
     /**

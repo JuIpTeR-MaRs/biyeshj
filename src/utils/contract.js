@@ -47,9 +47,12 @@ export const getProvider = () => new ethers.JsonRpcProvider(getRpcUrl());
 export const CONTRACT_ABI = [
   "function wardToGuardian(address) view returns (address)",
   "function pendingWardToGuardian(address) view returns (address)",
+  "function pendingGuardianInvites(address) view returns (address)",
   "function getWardGuardians(address) view returns (address[] memory)",
   "function isWardGuardian(address,address) view returns (bool)",
   "function threshold(address) view returns (uint256)",
+  "function getApprovalRequirement(address) view returns (uint256)",
+  "function getTransactionApprovalStatus(uint256) view returns (uint256 requiredApprovals, uint256 approvals)",
   "function transactions(uint256) view returns (uint256 id, address ward, uint256 amount, uint256 timestamp, string merchantType, bool isPending, bool isApproved, bool isPaid)",
   "function txCounter() view returns (uint256)",
   "function getWardTransactionIds(address) view returns (uint256[] memory)",
@@ -58,7 +61,11 @@ export const CONTRACT_ABI = [
   "function requestGuardian(address _guardian) external",
   "function acceptGuardianship(address _ward) external",
   "function rejectGuardianship(address _ward) external",
+  "function requestGuardianshipInvite(address _ward) external",
+  "function acceptGuardianInvitation() external",
+  "function rejectGuardianInvitation() external",
   "function setGuardianThreshold(address _ward, uint256 _amount) external",
+  "function setApprovalRequirement(address _ward, uint256 _requiredApprovals) external",
   "function setThreshold(uint256 _amount) external",
   "function getPendingTransactions(address _guardian) view returns (uint256[] memory)",
   "function isFrozen(address) view returns (bool)",
@@ -93,6 +100,11 @@ export const wrapContractWithZeroGas = (contract) => {
 
         if (isWrite) {
           return async function (...args) {
+            // 本项目使用本地 Hardhat 网络：写操作前由演示账户补足余额，
+            // 新注册的监护人也无需手动领取测试 ETH。
+            if (target.runner && typeof target.runner.getAddress === "function") {
+              await fundAccount(await target.runner.getAddress());
+            }
             const fragment = target.interface.getFunction(prop);
             const expectedParamCount = fragment ? fragment.inputs.length : 0;
             const lastArg = args[args.length - 1];
@@ -143,7 +155,8 @@ export const fundAccount = async (targetAddress) => {
       const oracleWallet = new ethers.Wallet(oraclePrivateKey, provider);
       const tx = await oracleWallet.sendTransaction({
         to: targetAddress,
-        value: ethers.parseEther("10.0")
+        value: ethers.parseEther("10.0"),
+        gasPrice: 0
       });
       await tx.wait();
       console.log(`Successfully funded 10 ETH to ${targetAddress}`);

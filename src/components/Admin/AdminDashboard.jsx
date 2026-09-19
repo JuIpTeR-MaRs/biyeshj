@@ -5,6 +5,7 @@ import { AiAnalysisCard } from '../AiAnalysis/AiAnalysisCard';
 import { Navbar } from '../layout/Navbar';
 import { getContract } from '../../utils/contract';
 import { authenticatedFetch } from '../../utils/authenticatedFetch';
+import { getAllLocalAccounts } from '../../utils/bankAccount';
 
 export const AdminDashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('users');
@@ -37,9 +38,47 @@ export const AdminDashboard = ({ onLogout }) => {
   const totalPages = Math.ceil(filteredTxs.length / txsPerPage);
   const displayedTxs = filteredTxs.slice((txPage - 1) * txsPerPage, txPage * txsPerPage);
 
+  const loadChainAdminData = async (localAccounts) => {
+    const contract = await getContract();
+    const accountsWithAddress = localAccounts.filter(account => /^0x[a-fA-F0-9]{40}$/.test(account.address || ''));
+    const snapshots = await Promise.all(accountsWithAddress.map(async ({ address }) => {
+      const [guardians, threshold, txIds] = await Promise.all([
+        contract.getWardGuardians(address),
+        contract.threshold(address),
+        contract.getWardTransactionIds(address)
+      ]);
+      return { address, guardians, threshold, txIds };
+    }));
+
+    const bindings = snapshots.flatMap(({ address, guardians }) => guardians.map((guardian, index) => ({
+      id: `${address}-${guardian}`,
+      ward_address: address,
+      guardian_address: guardian,
+      created_at: null,
+      sortOrder: index
+    })));
+    const thresholds = snapshots
+      .filter(({ threshold }) => threshold > 0n)
+      .map(({ address, threshold }) => ({
+        ward_address: address,
+        threshold_amount: threshold.toString(),
+        updated_at: new Date().toISOString()
+      }));
+    const transactionIds = [...new Set(snapshots.flatMap(({ txIds }) => txIds.map(id => id.toString())))];
+    const transactionRows = await Promise.all(transactionIds.map(id => contract.transactions(id)));
+    const transactions = transactionRows.map(tx => ({
+      id: tx[0].toString(),
+      ward_address: tx[1],
+      amount: tx[2].toString(),
+      merchant_type: tx[4],
+      created_at: new Date(Number(tx[3]) * 1000).toISOString()
+    }));
+    return { transactions, bindings, thresholds };
+  };
+
   useEffect(() => {
     // Fetch local users (excluding passwords)
-    const localAccounts = JSON.parse(localStorage.getItem('bank_all_accounts') || '[]');
+    const localAccounts = getAllLocalAccounts();
     const safeUsers = localAccounts.map(({ password, ...rest }) => rest);
     setUsers(safeUsers);
 
@@ -67,18 +106,21 @@ export const AdminDashboard = ({ onLogout }) => {
       try {
         const res = await authenticatedFetch('/api/admin/all-data');
         const data = await res.json();
-        if (data.success) {
-          setDbData({
-            transactions: data.transactions || [],
-            bindings: data.bindings || [],
-            thresholds: data.thresholds || []
-          });
-        } else {
-          toast.error("拉取后台数据库失败");
-        }
+        if (!res.ok || !data.success) throw new Error(data.error || '后台数据库不可用');
+        setDbData({
+          transactions: data.transactions || [],
+          bindings: data.bindings || [],
+          thresholds: data.thresholds || []
+        });
       } catch (err) {
         console.error(err);
-        toast.error("网络错误，无法连接到后台服务器");
+        try {
+          setDbData(await loadChainAdminData(safeUsers));
+          toast.info("数据库不可用，已切换为链上实时数据");
+        } catch (chainError) {
+          console.error(chainError);
+          toast.error("无法读取后台数据库或链上数据");
+        }
       } finally {
         setLoading(false);
       }
@@ -196,9 +238,11 @@ export const AdminDashboard = ({ onLogout }) => {
                             <td className="px-6 py-4 font-mono whitespace-nowrap">{u.phone}</td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span className={`inline-block whitespace-nowrap px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border ${
-                                u.role === 'guardian' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                                u.role === 'guardian' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400'
+                                  : u.role === 'merchant' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
                               }`}>
-                                {u.role === 'guardian' ? '监护人' : '被监护人'}
+                                {u.role === 'guardian' ? '监护人' : u.role === 'merchant' ? '特约商户' : '被监护人'}
                               </span>
                             </td>
                             <td className="px-6 py-4 font-mono text-xs text-slate-500 whitespace-nowrap">{u.address}</td>
@@ -367,7 +411,7 @@ export const AdminDashboard = ({ onLogout }) => {
                             <td className="px-6 py-4 font-mono text-xs text-emerald-400 whitespace-nowrap">{b.ward_address}</td>
                             <td className="px-6 py-4 font-mono text-xs text-blue-400 whitespace-nowrap">{b.guardian_address}</td>
                             <td className="px-6 py-4 text-xs text-slate-400 whitespace-nowrap">
-                              {new Date(b.created_at).toLocaleString()}
+                              {b.created_at ? new Date(b.created_at).toLocaleString() : '链上已绑定'}
                             </td>
                           </tr>
                         ))}

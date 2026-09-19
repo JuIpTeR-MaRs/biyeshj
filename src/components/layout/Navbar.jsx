@@ -36,10 +36,15 @@ export const Navbar = ({ currentUser, role, onLogout, unreadCount = 0, onOpenMes
       Icon = Shield;
       break;
     case 'ward':
-    default:
       roleLabel = "👤 被监护人";
       badgeClass = "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400";
       logoGradient = "from-emerald-600 to-teal-600 shadow-emerald-500/20";
+      Icon = User;
+      break;
+    default:
+      roleLabel = "👤 普通用户";
+      badgeClass = "bg-slate-500/10 border border-slate-500/20 text-slate-300";
+      logoGradient = "from-slate-600 to-slate-700 shadow-slate-500/20";
       Icon = User;
       break;
   }

@@ -1,0 +1,10 @@
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+# package-lock 与 package.json 的历史依赖声明并非完全同步；镜像中解析即可，
+# 不修改宿主机的 lockfile。
+RUN npm install --omit=dev --legacy-peer-deps
+COPY mock-server ./mock-server
+ENV NODE_ENV=production
+EXPOSE 3000
+CMD ["node", "mock-server/index.js"]

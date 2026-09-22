@@ -1,0 +1,112 @@
+services:
+  preflight:
+    image: alpine:3.21
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        test "$${#MYSQL_ROOT_PASSWORD}" -ge 16
+        && test "$${#ADMIN_PASSWORD}" -ge 16
+        && test "$$MYSQL_ROOT_PASSWORD" != change-this-mysql-password
+        && test "$$ADMIN_PASSWORD" != change-this-admin-password
+        || { echo 'MYSQL_ROOT_PASSWORD and ADMIN_PASSWORD must each be at least 16 characters and must not use example placeholders.' >&2; exit 1; }
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: guardian_db
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./navicat_init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      preflight:
+        condition: service_completed_successfully
+
+  chain:
+    build:
+      context: .
+      dockerfile: Dockerfile.chain
+    command: npx hardhat node --config hardhat.docker.config.cjs --hostname 0.0.0.0
+    ports:
+      - "127.0.0.1:8545:8545"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:8545',{method:'POST',headers:{'content-type':'application/json'},body:'{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"eth_chainId\\\",\\\"params\\\":[],\\\"id\\\":1}'}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  deploy:
+    build:
+      context: .
+      dockerfile: Dockerfile.chain
+    command: npx hardhat run scripts/deploy.cjs --config hardhat.docker.config.cjs --network localhost
+    environment:
+      RPC_URL: http://chain:8545
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      DB_NAME: guardian_db
+    depends_on:
+      mysql:
+        condition: service_healthy
+      chain:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      RPC_URL: http://chain:8545
+      # Hardhat 新链上首次部署 GuardianDApp 的确定性地址。
+      CONTRACT_ADDRESS: 0x5FbDB2315678afecb367f032d93F642f64180aa3
+      ORACLE_PRIVATE_KEY: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      DB_NAME: guardian_db
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD}
+      ADMIN_PHONE: ${ADMIN_PHONE:-13800138000}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      ALIPAY_APP_ID: ${ALIPAY_APP_ID:-}
+      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:-}
+      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-}
+      ALIPAY_GATEWAY: ${ALIPAY_GATEWAY:-https://openapi-sandbox.dl.alipaydev.com/gateway.do}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      chain:
+        condition: service_healthy
+      deploy:
+        condition: service_completed_successfully
+      preflight:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+
+  web:
+    build:
+      context: .
+      args:
+        VITE_RPC_URL: ${VITE_RPC_URL:-http://localhost:8545}
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  mysql-data:

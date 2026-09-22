@@ -74,6 +74,8 @@ npm install
 
 在 `mock-server/.env` 中配置后端环境变量。该文件已被 `.gitignore` 排除，请勿提交真实密钥。
 
+使用 Docker Compose 时，在项目根目录复制 `.env.example` 为 `.env`，并将 `MYSQL_ROOT_PASSWORD` 和 `ADMIN_PASSWORD` 设置为各自至少 16 个字符的强密码。Compose 启动预检会拒绝空值、过短密码及示例占位值；Hardhat RPC 默认仅映射到本机 `127.0.0.1:8545`。
+
 ```env
 # Hardhat / Ethereum
 RPC_URL=http://127.0.0.1:8545

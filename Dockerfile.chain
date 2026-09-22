@@ -1,0 +1,10 @@
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+# Docker 节点只需 ethers 插件；测试用途的 hardhat-toolbox 依赖不进入镜像。
+RUN npm install --legacy-peer-deps \
+ && npm install --no-save --legacy-peer-deps @nomicfoundation/hardhat-ethers@^3.0.0
+COPY contracts ./contracts
+COPY scripts ./scripts
+COPY hardhat.config.cjs ./
+COPY hardhat.docker.config.cjs ./

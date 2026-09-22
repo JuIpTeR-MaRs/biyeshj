@@ -1,0 +1,17 @@
+.git
+.idea
+node_modules
+dist
+release
+artifacts
+cache
+coverage
+test-results
+playwright-report
+wdio-appium.log
+*.log
+.env
+.env.*
+!.env.example
+mock-server/local-ledger.json
+scripts/alipay_keys

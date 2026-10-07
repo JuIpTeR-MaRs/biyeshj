@@ -4,6 +4,8 @@ GuardianDApp 是一个面向家庭监护场景的消费管理项目。系统支�
 
 项目使用同一套 React 前端同时支持 Web、Electron 桌面端和 Capacitor Android 端，适合作为《基于 Solidity 的家庭监护消费管理系统的设计与实现》的毕业设计项目。
 
+FISCO BCOS 本地测试链的搭建、部署和验证步骤见 [FISCO_BCOS.md](FISCO_BCOS.md)。
+
 ## 核心功能
 
 - 被监护人、监护人、商户和管理员多角色使用

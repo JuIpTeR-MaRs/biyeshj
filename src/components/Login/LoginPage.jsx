@@ -261,7 +261,8 @@ export const LoginPage = ({ onLogin }) => {
                 <div className="flex justify-end mb-2">
                   <button 
                     type="button" 
-                    onClick={() => setRole('merchant')} 
+                    onClick={() => setRole(current => current === 'merchant' ? 'user' : 'merchant')}
+                    aria-pressed={role === 'merchant'}
                     className={`flex items-center space-x-2 px-3 py-2 rounded-xl border transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] ${
                       role === 'merchant' 
                         ? 'bg-amber-500/10 border-amber-500 text-amber-400 shadow-md shadow-amber-500/5' 

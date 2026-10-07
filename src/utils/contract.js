@@ -145,6 +145,7 @@ export const getContract = async (specifiedPrivateKey = null) => {
  * 如果本地测试账户余额低于 1 ETH，自动从 Hardhat 默认的 Account #0 (Oracle 账户) 充值 10 ETH
  */
 export const fundAccount = async (targetAddress) => {
+  if (import.meta.env.VITE_CHAIN_BACKEND === "fisco") return;
   try {
     const provider = getProvider();
     const balance = await provider.getBalance(targetAddress);

@@ -78,7 +78,7 @@ export const HistoryList = ({ txs, role, onContinuePay }) => {
                 </div>
                 <div className="mt-4 pt-4 border-t border-slate-900 text-[10px] text-slate-500 font-mono flex justify-between items-center">
                   <span>ID: {tx.id}</span>
-                  <span>{new Date(tx.timestamp * 1000).toLocaleString()}</span>
+                  <span>{new Date(Number(tx.timestamp) * (Number(tx.timestamp) < 1e11 ? 1000 : 1)).toLocaleString()}</span>
                 </div>
               </div>
             );

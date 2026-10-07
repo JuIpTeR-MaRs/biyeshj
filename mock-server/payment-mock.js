@@ -27,7 +27,9 @@ const CONTRACT_ABI = [
 
 class PaymentMockService {
     constructor() {
-        this.provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+        this.provider = new ethers.JsonRpcProvider(process.env.RPC_URL, undefined, {
+            polling: process.env.CHAIN_BACKEND === "fisco"
+        });
         this.wallet = new ethers.Wallet(process.env.ORACLE_PRIVATE_KEY, this.provider);
         this.contract = new ethers.Contract(process.env.CONTRACT_ADDRESS, CONTRACT_ABI, this.wallet);
         
@@ -48,6 +50,14 @@ class PaymentMockService {
 
         // 异步初始化数据库表
         this.initDatabase();
+    }
+
+    async getPendingPaymentHash(txId, throughBlock) {
+        const events = await this.contract.queryFilter(
+            this.contract.filters.PaymentPendingApproval(txId), 0, throughBlock
+        );
+        if (events.length !== 1) throw new Error(`Cannot identify payment transaction ${txId}`);
+        return events[0].transactionHash;
     }
 
     loadLocalLedger() {
@@ -170,11 +180,12 @@ class PaymentMockService {
             }
 
             // Setup listeners for persistence
-            this.contract.on("TransactionConfirmed", async (txId, guardian) => {
+            this.contract.on("TransactionConfirmed", async (txId, guardian, event) => {
                 try {
+                    const paymentHash = await this.getPendingPaymentHash(txId, event.log.blockNumber);
                     await this.dbPool.execute(
-                        "UPDATE transactions SET is_pending = 0, is_approved = 1 WHERE id = ?",
-                        [txId]
+                        "UPDATE transactions SET is_pending = 0, is_approved = 1 WHERE tx_hash = ?",
+                        [paymentHash]
                     );
                     console.log(`[MySQL] Tx ${txId} marked as approved.`);
                 } catch (e) {
@@ -182,11 +193,12 @@ class PaymentMockService {
                 }
             });
 
-            this.contract.on("TransactionRejected", async (txId, guardian) => {
+            this.contract.on("TransactionRejected", async (txId, guardian, event) => {
                 try {
+                    const paymentHash = await this.getPendingPaymentHash(txId, event.log.blockNumber);
                     await this.dbPool.execute(
-                        "UPDATE transactions SET is_pending = 0, is_approved = 0 WHERE id = ?",
-                        [txId]
+                        "UPDATE transactions SET is_pending = 0, is_approved = 0 WHERE tx_hash = ?",
+                        [paymentHash]
                     );
                     console.log(`[MySQL] Tx ${txId} marked as rejected.`);
                 } catch (e) {
@@ -194,11 +206,11 @@ class PaymentMockService {
                 }
             });
             
-            this.contract.on("PaymentAutoApproved", async (txId, ward, amount) => {
+            this.contract.on("PaymentAutoApproved", async (txId, ward, amount, event) => {
                 try {
                     await this.dbPool.execute(
-                        "UPDATE transactions SET is_pending = 0, is_approved = 1, is_paid = 1 WHERE id = ?",
-                        [txId]
+                        "UPDATE transactions SET is_pending = 0, is_approved = 1, is_paid = 1 WHERE tx_hash = ?",
+                        [event.log.transactionHash]
                     );
                     console.log(`[MySQL] Tx ${txId} marked as auto approved and paid.`);
                 } catch (e) {
@@ -226,12 +238,16 @@ class PaymentMockService {
             );
             const receipt = await tx.wait();
             const txHash = receipt.hash;
+            const autoApproved = receipt.logs.some(log => {
+                try { return this.contract.interface.parseLog(log)?.name === "PaymentAutoApproved"; }
+                catch { return false; }
+            });
             
             // 记录到本地 MySQL 数据库 (双重记账)
             try {
                 const [result] = await this.dbPool.execute(
-                    `INSERT INTO transactions (ward_address, amount, merchant_type, tx_hash, merchant_address, is_pending, is_approved, is_paid) VALUES (?, ?, ?, ?, ?, 1, 0, 0)`,
-                    [wardAddress, amount, merchantType, txHash, merchantAddress]
+                    `INSERT INTO transactions (ward_address, amount, merchant_type, tx_hash, merchant_address, is_pending, is_approved, is_paid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [wardAddress, amount, merchantType, txHash, merchantAddress, autoApproved ? 0 : 1, autoApproved ? 1 : 0, autoApproved ? 1 : 0]
                 );
                 console.log(`[MySQL] 成功写入本地数据库, ID: ${result.insertId}`);
             } catch (dbError) {
@@ -243,9 +259,9 @@ class PaymentMockService {
                     merchant_type: merchantType,
                     merchant_address: merchantAddress,
                     tx_hash: txHash,
-                    is_pending: true,
-                    is_approved: false,
-                    is_paid: false,
+                    is_pending: !autoApproved,
+                    is_approved: autoApproved,
+                    is_paid: autoApproved,
                     created_at: new Date().toISOString()
                 });
                 this.saveLocalLedger();

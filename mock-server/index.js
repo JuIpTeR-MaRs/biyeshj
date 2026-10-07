@@ -1156,7 +1156,7 @@ app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
     }
 });
 
-paymentService.generateSeedData();
+if (process.env.CHAIN_BACKEND !== "fisco") paymentService.generateSeedData();
 const HOST = process.env.HOST || "127.0.0.1";
 app.listen(PORT, HOST, () => {
     console.log(`🏦 Local Bank Core running on http://localhost:${PORT}`);

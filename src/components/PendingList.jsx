@@ -54,7 +54,7 @@ export const PendingList = ({ txs, onAction, loading }) => (
               </div>
             </div>
             <div className="mt-4 pt-4 border-t border-slate-900 text-[10px] text-slate-500 uppercase tracking-widest font-bold">
-              Transaction ID: {tx.id.toString()} • {new Date(Number(tx.timestamp)*1000).toLocaleString()}
+              Transaction ID: {tx.id.toString()} • {new Date(Number(tx.timestamp) * (Number(tx.timestamp) < 1e11 ? 1000 : 1)).toLocaleString()}
             </div>
           </div>
         ))}

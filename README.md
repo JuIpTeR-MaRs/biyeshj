@@ -12,10 +12,10 @@ FISCO BCOS 本地测试链的搭建、部署和验证步骤见 [FISCO_BCOS.md](F
 - 监护关系申请、接受、拒绝与查询
 - 单笔消费阈值和受限商户类别管理
 - 正常交易自动通过，超额或受限交易进入审批
-- 监护人批准、拒绝及账户冻结/解冻
+- 监护人批准、拒绝，以及管理员通过链上交易冻结/解冻账户
 - 支付宝沙箱预下单、支付查询和结果回写
-- MySQL 业务明细与 Ethereum 智能合约关键状态双重记录
-- DeepSeek 消费分析及报告摘要上链验证
+- MySQL 业务明细与智能合约关键状态双重记录，支持 Hardhat 和本地 FISCO BCOS 测试链
+- DeepSeek 按日期范围分析消费流水，并对符合条件的月度报告进行摘要上链验证
 - Web、Windows 和 Android 多端运行
 
 ## 技术栈
@@ -41,7 +41,7 @@ React + Vite
         ▼
 Node.js + Express API
 ├─ MySQL：交易、监护关系、阈值和 AI 报告
-├─ Hardhat/Ethereum：关键状态与摘要存证
+├─ Hardhat 或 FISCO BCOS 本地测试链：关键状态与摘要存证
 ├─ 支付宝沙箱：模拟支付流程
 └─ DeepSeek：消费记录辅助分析
 ```
@@ -150,6 +150,8 @@ npm run dev:all
 
 访问 Vite 输出的本地地址即可使用 Web 端。
 
+以上启动命令使用 Hardhat 本地链。使用 FISCO BCOS 时，按 [本地 FISCO BCOS 测试链](FISCO_BCOS.md) 建链、部署并设置 `CHAIN_BACKEND=fisco` 和 `VITE_CHAIN_BACKEND=fisco`，再运行 `npm run dev:all`；不要同时运行 `npm run node` 或 `npm run deploy`。
+
 ## Electron 客户端
 
 启动源码模式：
@@ -200,8 +202,11 @@ npm run cap:android
 ## 身份认证与安全边界
 
 - 普通用户通过一次性挑战和钱包签名创建短期 API 会话。
+- 注册时需要一次性模拟短信验证码；开发环境会在页面和后端控制台显示验证码，生产环境不会在 API 响应中返回验证码。
 - 管理员使用服务端 `ADMIN_PASSWORD` 登录，密码不再硬编码在前端。
 - 受保护接口校验会话类型、钱包地址归属或管理员权限。
+- 监护阈值及账户冻结状态以链上确认结果为准；管理员冻结/解冻需由服务端合约管理员账户提交交易。
+- AI 日期范围分析由后端按当前角色和监护关系筛选可访问流水，日期范围包含首尾两天。
 - 浏览器只保存加密后的本地钱包 keystore；解密后的私钥仅保留在当前运行内存中。
 - CORS 仅允许 `CORS_ORIGINS` 中配置的来源。
 - Android Release 禁止明文流量和用户自签名证书。
@@ -219,6 +224,9 @@ npm run test:contract
 
 # 单独运行前端单元测试
 npm run test:unit
+
+# 后端认证、支付镜像与分析权限测试
+node --test test/auth-security.test.cjs test/payment-mirror-security.test.cjs
 
 # PC / Electron 端到端测试
 npm run test:e2e:pc

@@ -3,18 +3,18 @@ const hre = require("hardhat");
 async function main() {
   const [oracle, ward, guardian] = await hre.ethers.getSigners();
   
-  // Read contract address from mock-server/.env
+  // Read contract address from root .env
   const fs = require("fs");
   const path = require("path");
-  const envPath = path.join(__dirname, "../mock-server/.env");
+  const envPath = path.join(__dirname, "../.env");
   let dappAddress;
   if (fs.existsSync(envPath)) {
     const env = fs.readFileSync(envPath, "utf8");
-    dappAddress = env.match(/CONTRACT_ADDRESS=(.*)/)[1];
+    dappAddress = env.match(/^CONTRACT_ADDRESS=(.*)$/m)?.[1];
   }
 
   if (!dappAddress) {
-    console.error("❌ Contract address not found in mock-server/.env. Please deploy first.");
+    console.error("❌ Contract address not found in root .env. Please deploy first.");
     return;
   }
 

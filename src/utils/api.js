@@ -48,6 +48,9 @@ export const getRpcUrl = () => {
  */
 export const getApiBaseUrl = () => {
   if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL.replace(/\/$/, '');
+  if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
+    return 'http://127.0.0.1:3000';
+  }
   if (isNative()) {
     const host = getHostIp();
     const scheme = import.meta.env.PROD ? 'https' : 'http';

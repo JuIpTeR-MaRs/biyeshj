@@ -28,9 +28,32 @@ Invoke-RestMethod http://127.0.0.1:8545 -Method Post -ContentType 'application/j
 
 应返回 `0x4ee8`（20200）。节点目录位于被 Git 忽略的 `.fisco-local/`；其中包含链数据与证书，不要提交。
 
-## 部署合约
+## 部署项目到本地测试链
 
-从项目根目录运行：
+先安装项目依赖，并按 [README.md](README.md#初始化数据库) 初始化 MySQL 的 `guardian_db`。在项目根目录复制环境变量模板：
+
+```powershell
+cd D:\biyesheji
+npm install
+Copy-Item .env.example .env
+```
+
+编辑根目录 `.env`，至少配置以下值（私钥不要写入文档或提交到 Git）：
+
+```env
+RPC_URL=http://127.0.0.1:8545
+CHAIN_BACKEND=fisco
+VITE_RPC_URL=http://127.0.0.1:8545
+VITE_CHAIN_BACKEND=fisco
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=本地数据库密码
+DB_NAME=guardian_db
+ADMIN_PASSWORD=独立的管理员强密码
+```
+
+确认节点已按上文启动、`eth_chainId` 返回 `0x4ee8` 后，从项目根目录编译并部署合约：
 
 ```powershell
 npm run compile
@@ -40,7 +63,16 @@ node scripts/deploy-fisco.cjs
 
 部署脚本从交易收据读取实际合约地址，验证链上代码和 oracle，并将结果写入 `.fisco-local/deployment.json`。请仅使用本地测试账户私钥；正式链应使用独立管理的部署密钥。
 
-前端 `.env` 设置 `VITE_RPC_URL=http://127.0.0.1:8545`、`VITE_CHAIN_BACKEND=fisco`；后端 `mock-server/.env` 设置同一 `RPC_URL`、部署结果中的 `CONTRACT_ADDRESS` 和对应的 `ORACLE_PRIVATE_KEY`，并设置 `CHAIN_BACKEND=fisco`。该设置让事件监听使用轮询，兼容 FISCO BCOS 的日志 RPC。前端会从 `/api/contract/info` 同步合约地址。当前项目的零 gas 交易设置适用于此本地测试链；切换到启用 Balance 的联盟链时，需要按链的 gas 和账户配置调整。
+部署成功后，把 `.fisco-local/deployment.json` 中的 `contractAddress` 填入 `.env` 的 `CONTRACT_ADDRESS`，并将部署账户的私钥填入 `ORACLE_PRIVATE_KEY`。脚本把部署账户设置为合约 oracle，因此这两个值必须与本次部署对应。配置 `CHAIN_BACKEND=fisco` 后，事件监听使用轮询，兼容 FISCO BCOS 的日志 RPC；前端会从 `/api/contract/info` 同步合约地址。
+
+```env
+CONTRACT_ADDRESS=本次部署的contractAddress
+ORACLE_PRIVATE_KEY=本次部署账户的私钥
+```
+
+在项目根目录运行 `npm run dev:all` 启动 API 和 Web 前端，访问 Vite 输出的地址。要运行桌面端，另开一个终端执行 `npm run app`，或使用 `npm run app:ward`、`npm run app:guardian`。开发版 Electron 运行期间需要保持 `npm run dev:all` 启动。
+
+当前项目的零 gas 交易设置适用于此本地测试链；切换到启用 Balance 的联盟链时，需要按链的 gas 和账户配置调整。`docker-compose.yml` 当前启动的是 Hardhat 节点，不是本节的 FISCO BCOS 节点，不能用它替代上述步骤。
 
 已有链数据时，在 Windows 命令提示符中启动测试环境和桌面软件：
 
@@ -49,7 +81,11 @@ wsl -d Ubuntu -- bash -lc "cd /mnt/d/biyesheji/.fisco-local/nodes/127.0.0.1 && b
 npm run dev:all
 ```
 
-在另一个命令提示符窗口运行 `npm run app`，或分别运行 `npm run app:ward`、`npm run app:guardian`。开发版 Electron 需要 `npm run dev:all` 保持运行。
+在另一个命令提示符窗口运行 `npm run app`，或分别运行 `npm run app:ward`、`npm run app:guardian`。
+
+### 正式部署前
+
+当前 `src/utils/bankAccount.js` 的 `getAllLocalAccounts()` 会自动创建三个演示账户，默认 `vite build` 没有排除这些账户。发布 Web、Electron 或 Android 包前，必须先从生产构建中移除这段自动初始化逻辑，确认生产链与数据库不复用演示地址，并重新构建客户端。仅跳过 `npm run seed` 不会移除前端演示账户。正式联盟链还需使用独立的部署密钥和 Oracle 密钥，并按实际网络配置 RPC、证书、权限和访问控制。
 
 ## 停止或重启
 

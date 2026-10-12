@@ -74,15 +74,18 @@ npm install
 
 ## 环境变量
 
-在 `mock-server/.env` 中配置后端环境变量。该文件已被 `.gitignore` 排除，请勿提交真实密钥。
+前端和本地后端统一读取项目根目录的 `.env`。该文件已被 `.gitignore` 排除，请勿提交真实密钥；`mock-server/.env` 和 `mock-server/env` 不再用于本地启动。
 
 使用 Docker Compose 时，在项目根目录复制 `.env.example` 为 `.env`，并将 `MYSQL_ROOT_PASSWORD` 和 `ADMIN_PASSWORD` 设置为各自至少 16 个字符的强密码。Compose 启动预检会拒绝空值、过短密码及示例占位值；Hardhat RPC 默认仅映射到本机 `127.0.0.1:8545`。
 
 ```env
-# Hardhat / Ethereum
+# FISCO BCOS 或 Hardhat RPC
 RPC_URL=http://127.0.0.1:8545
 ORACLE_PRIVATE_KEY=仅用于本地开发的预言机私钥
 CONTRACT_ADDRESS=部署后自动更新或手动填写
+CHAIN_BACKEND=fisco
+VITE_RPC_URL=http://127.0.0.1:8545
+VITE_CHAIN_BACKEND=fisco
 
 # MySQL
 DB_HOST=127.0.0.1
@@ -104,7 +107,7 @@ DEEPSEEK_API_KEY=您的DeepSeek_API_KEY
 ADMIN_PASSWORD=请设置独立的管理员强密码
 HOST=127.0.0.1
 PORT=3000
-CORS_ORIGINS=http://localhost:5173,capacitor://localhost,http://localhost,https://localhost
+CORS_ORIGINS=http://localhost:5173,capacitor://localhost,http://localhost,https://localhost,null
 ```
 
 前端远程部署或 Android Release 构建可在根目录 `.env.local` 中配置：

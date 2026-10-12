@@ -2,7 +2,7 @@ const express = require("express");
 const { ethers } = require("ethers");
 const paymentService = require("./payment-mock");
 const auth = require("./auth");
-require("dotenv").config({ path: require("path").join(__dirname, ".env") });
+require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
 const app = express();
 app.use(express.json());
@@ -24,6 +24,8 @@ const PORT = process.env.PORT || 3000;
 
 app.post("/api/auth/challenge", auth.issueChallenge);
 app.post("/api/auth/admin/sms", auth.issueAdminSmsCode);
+app.post("/api/auth/register/sms", auth.issueRegistrationSmsCode);
+app.post("/api/auth/register/verify", auth.verifyRegistrationSmsCode);
 app.post("/api/auth/session", auth.createWalletSession);
 app.post("/api/auth/admin", auth.createAdminSession);
 
@@ -89,8 +91,20 @@ app.post("/api/guardian/threshold", auth.requireAuth, requireWallet, async (req,
     }
     const isGuardian = await paymentService.contract.isWardGuardian(wardAddress, req.auth.address);
     if (!isGuardian) return res.status(403).json({ success: false, error: "Guardian authorization required" });
-    const result = await paymentService.saveThreshold(wardAddress, amount);
-    res.status(result.success ? 200 : 500).json(result);
+    if (!/^(0|[1-9]\d*)$/.test(String(amount))) {
+        return res.status(400).json({ success: false, error: "Invalid threshold amount" });
+    }
+    try {
+        const onChainAmount = await paymentService.contract.threshold(wardAddress);
+        if (BigInt(amount) !== onChainAmount) {
+            return res.status(409).json({ success: false, error: "Threshold does not match the confirmed on-chain value" });
+        }
+        const result = await paymentService.saveThreshold(wardAddress, onChainAmount.toString());
+        res.status(result.success ? 200 : 500).json(result);
+    } catch (err) {
+        console.error("Verify threshold failed:", err);
+        res.status(502).json({ success: false, error: "Unable to verify on-chain threshold" });
+    }
 });
 
 // 2.7 获取最新合约地址与网络配置接口
@@ -116,15 +130,37 @@ app.get("/api/guardian/status/:address", auth.requireAuth, requireWallet, requir
             "SELECT ward_address FROM guardianship_bindings WHERE LOWER(guardian_address) = LOWER(?)",
             [address]
         );
-        const [thresholdRows] = await paymentService.dbPool.execute(
-            "SELECT threshold_amount FROM user_thresholds WHERE LOWER(ward_address) = LOWER(?)",
-            [address]
-        );
+        let guardians = asWard.map(r => r.guardian_address);
+        let wards = asGuardian.map(r => r.ward_address);
+        let onChainThreshold = null;
+        const contract = paymentService.contract;
+        try {
+            guardians = await contract.getWardGuardians(address);
+        } catch (chainErr) {
+            console.warn("Unable to verify guardians on chain:", chainErr);
+        }
+        try {
+            const boundEvents = await contract.queryFilter(contract.filters.GuardianBound(null, address), 0, "latest");
+            const candidateWards = [...new Set([
+                ...wards,
+                ...boundEvents.map(event => event.args.ward)
+            ].map(ward => ward.toLowerCase()))];
+            wards = (await Promise.all(candidateWards.map(async ward =>
+                await contract.isWardGuardian(ward, address) ? ward : null
+            ))).filter(Boolean);
+        } catch (chainErr) {
+            console.warn("Unable to discover wards on chain:", chainErr);
+        }
+        try {
+            onChainThreshold = await contract.threshold(address);
+        } catch (chainErr) {
+            console.warn("Unable to verify guardian threshold on chain:", chainErr);
+        }
         res.json({
             success: true,
-            guardians: asWard.map(r => r.guardian_address),
-            wards: asGuardian.map(r => r.ward_address),
-            threshold: thresholdRows.length > 0 ? thresholdRows[0].threshold_amount.toString() : "0"
+            guardians,
+            wards,
+            threshold: onChainThreshold?.toString() ?? null
         });
     } catch (err) {
         console.error("Query guardian status error:", err.message);
@@ -935,6 +971,29 @@ app.get("/api/alipay/return", async (req, res) => {
     }
 });
 
+// 管理员通过服务端部署账户执行链上冻结/解冻。
+app.post("/api/admin/freeze", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    const { address, freeze } = req.body || {};
+    if (!ethers.isAddress(address) || typeof freeze !== "boolean") {
+        return res.status(400).json({ success: false, error: "无效的账户地址或冻结状态" });
+    }
+    try {
+        const contract = paymentService.contract;
+        const [owner, signer] = await Promise.all([contract.owner(), contract.runner.getAddress()]);
+        if (!auth.sameAddress(owner, signer)) {
+            return res.status(503).json({ success: false, error: "服务端部署账户不是合约管理员" });
+        }
+        const tx = await contract.setFreezeAccount(address, freeze, { gasPrice: 0 });
+        const receipt = await tx.wait();
+        if (!receipt || receipt.status !== 1) throw new Error("链上交易未成功确认");
+        const isFrozen = await contract.isFrozen(address);
+        res.json({ success: true, isFrozen, txHash: receipt.hash });
+    } catch (err) {
+        console.error("Admin freeze failed:", err);
+        res.status(502).json({ success: false, error: "链上冻结操作失败" });
+    }
+});
+
 // 5. 管理员获取后台全部数据
 app.get("/api/admin/all-data", auth.requireAuth, auth.requireAdmin, async (req, res) => {
     try {
@@ -965,11 +1024,24 @@ app.get("/api/merchant/transactions/:address", auth.requireAuth, requireWallet, 
 const aiRequests = new Map();
 let aiGlobalRequests = [];
 app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
-    const { txs, role } = req.body;
-    if (!txs || !Array.isArray(txs) || txs.length === 0) {
+    const { txs: requestedTxs, role, wardNames, startDate, endDate, scopeWard } = req.body || {};
+    const hasDateRange = startDate !== undefined || endDate !== undefined;
+    if (hasDateRange) {
+        const validDate = value => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+            && !Number.isNaN(Date.parse(`${value}T00:00:00Z`))
+            && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+        if (!validDate(startDate) || !validDate(endDate) || startDate > endDate) {
+            return res.status(400).json({ success: false, error: "无效的日期范围" });
+        }
+    }
+    const isAdminAnalysis = role === "admin";
+    if (isAdminAnalysis && req.auth.type !== "admin") {
+        return res.status(403).json({ success: false, error: "Admin role required" });
+    }
+    if (!hasDateRange && !isAdminAnalysis && (!requestedTxs || !Array.isArray(requestedTxs) || requestedTxs.length === 0)) {
         return res.status(400).json({ success: false, error: "缺少交易流水数据 txs" });
     }
-    if (txs.length > 200) return res.status(413).json({ success: false, error: "交易数量超过上限" });
+    if (!hasDateRange && !isAdminAnalysis && requestedTxs.length > 200) return res.status(413).json({ success: false, error: "交易数量超过上限" });
     const principal = req.auth.address;
     const now = Date.now();
     aiGlobalRequests = aiGlobalRequests.filter(ts => now - ts < 60_000);
@@ -984,13 +1056,71 @@ app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
         if (live.length) aiRequests.set(address, live);
         else aiRequests.delete(address);
     }
-    if (role === "admin" && req.auth.type !== "admin") {
-        return res.status(403).json({ success: false, error: "Admin role required" });
+    const ids = hasDateRange || isAdminAnalysis ? [] : requestedTxs.map(item => String(item?.id ?? ""));
+    if (!hasDateRange && !isAdminAnalysis && (ids.some(id => !/^[1-9]\d*$/.test(id)) || new Set(ids).size !== ids.length)) {
+        return res.status(400).json({ success: false, error: "无效的交易 ID" });
     }
-    if (req.auth.type !== "admin") {
+    let txs;
+    try {
+        if (hasDateRange) {
+            const ledger = await paymentService.getAllAdminData();
+            if (!ledger.success) throw new Error(ledger.error || "流水读取失败");
+            const dayInShanghai = new Intl.DateTimeFormat("sv-SE", {
+                timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit"
+            });
+            txs = (ledger.transactions || []).filter(item => {
+                const rawTime = item.created_at || item.timestamp;
+                const parsedTime = rawTime ? new Date(rawTime) : null;
+                const day = parsedTime && !Number.isNaN(parsedTime.getTime()) ? dayInShanghai.format(parsedTime) : "";
+                return day >= startDate && day <= endDate;
+            });
+            if (req.auth.type !== "admin") {
+                if (scopeWard && scopeWard !== "all" && (role !== "guardian" || !ethers.isAddress(scopeWard))) {
+                    return res.status(400).json({ success: false, error: "无效的账户筛选条件" });
+                }
+                const accessible = [];
+                const guardianAccess = new Map();
+                for (const item of txs) {
+                    const ward = item.ward_address;
+                    if (role === "merchant" && auth.sameAddress(principal, item.merchant_address)) accessible.push(item);
+                    else if (role === "ward" && auth.sameAddress(principal, ward)) accessible.push(item);
+                    else if (role === "guardian" && ward && (!scopeWard || scopeWard === "all" || auth.sameAddress(scopeWard, ward))) {
+                        const key = ward.toLowerCase();
+                        if (!guardianAccess.has(key)) guardianAccess.set(key, await paymentService.contract.isWardGuardian(ward, principal));
+                        if (guardianAccess.get(key)) accessible.push(item);
+                    }
+                }
+                txs = accessible;
+            }
+            txs.sort((a, b) => new Date(a.created_at || a.timestamp) - new Date(b.created_at || b.timestamp));
+            if (!txs.length) return res.status(404).json({ success: false, error: "所选日期范围内暂无可分析的交易记录" });
+        } else if (isAdminAnalysis) {
+            // 与管理员流水页面共用数据源；MySQL 不可用时，该方法返回服务端本地账本。
+            const adminData = await paymentService.getAllAdminData();
+            if (!adminData.success) throw new Error(adminData.error || "管理员流水读取失败");
+            txs = [...(adminData.transactions || [])]
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime() || Number(b.id) - Number(a.id))
+                .slice(0, 200);
+            if (!txs.length) return res.status(404).json({ success: false, error: "暂无可分析的交易记录" });
+        } else {
+            const placeholders = ids.map(() => "?").join(",");
+            const [rows] = await paymentService.dbPool.execute(
+                `SELECT id, ward_address, amount, merchant_type, merchant_address, created_at, is_pending, is_approved FROM transactions WHERE id IN (${placeholders})`,
+                ids
+            );
+            if (rows.length !== ids.length) return res.status(404).json({ success: false, error: "交易记录不存在" });
+            const byId = new Map(rows.map(row => [String(row.id), row]));
+            txs = ids.map(id => byId.get(id));
+        }
+        if (!hasDateRange) txs.sort((left, right) => BigInt(left.id) < BigInt(right.id) ? -1 : BigInt(left.id) > BigInt(right.id) ? 1 : 0);
+    } catch (err) {
+        console.error("Load analysis transactions failed:", err);
+        return res.status(500).json({ success: false, error: "无法读取交易记录" });
+    }
+    if (!hasDateRange && req.auth.type !== "admin") {
         for (const item of txs) {
-            const ward = item.ward || item.ward_address;
-            const merchant = item.merchantAddress || item.merchant_address;
+            const ward = item.ward_address;
+            const merchant = item.merchant_address;
             let allowed = false;
             if (role === "merchant") allowed = auth.sameAddress(principal, merchant);
             else if (role === "guardian") allowed = Boolean(ward) && await paymentService.contract.isWardGuardian(ward, principal);
@@ -999,13 +1129,22 @@ app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
         }
     }
 
+    // 姓名仅用于报告展示；交易内容与访问权限仍以数据库和链上数据为准。
+    const namesByAddress = wardNames && typeof wardNames === "object" && !Array.isArray(wardNames) ? wardNames : {};
+    const displayName = address => {
+        const name = namesByAddress[String(address).toLowerCase()];
+        return typeof name === "string" && name.trim() && name.length <= 40 && !/[\r\n]/.test(name)
+            ? name.trim()
+            : `账户 ${String(address).slice(0, 6)}...${String(address).slice(-4)}`;
+    };
+
     // 格式化交易记录，使其更易读
     const normalizeTxs = (list) => {
         return list.map(t => {
             const amount = t.amount || "0";
             const category = t.merchantType || t.merchant_type || "未知";
             const ward = t.ward || t.ward_address || "未知";
-            const wardName = t.wardName || "";
+            const wardName = displayName(ward);
             const time = t.timestamp ? new Date(Number(t.timestamp) * 1000).toLocaleString() : (t.created_at ? new Date(t.created_at).toLocaleString() : "未知");
             
             let status = "已完成";
@@ -1015,7 +1154,7 @@ app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
             
             return {
                 id: t.id,
-                ward: wardName ? `${wardName} (${ward.slice(0, 6)}...${ward.slice(-4)})` : ward,
+                ward: wardName,
                 amount: `${amount} 元/Wei`,
                 category,
                 time,
@@ -1024,7 +1163,14 @@ app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
         });
     };
 
-    const formattedTxs = normalizeTxs(txs);
+    const formattedTxs = normalizeTxs(txs.slice(-200));
+    const periodLabel = hasDateRange ? `${startDate} 至 ${endDate}（含首尾两天）` : "当前选择范围";
+    const totalAmount = txs.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    const categoryCounts = Object.fromEntries(txs.reduce((counts, item) => {
+        const category = item.merchant_type || item.merchantType || "未知";
+        counts.set(category, (counts.get(category) || 0) + 1);
+        return counts;
+    }, new Map()));
     const apiKey = process.env.DEEPSEEK_API_KEY;
 
     if (!apiKey) {
@@ -1044,7 +1190,7 @@ app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
             .map(([category, count]) => `${category}（${count} 笔）`)
             .join("、");
         const wardCount = new Set(txs.map(item => item.ward || item.ward_address).filter(Boolean)).size;
-        const scope = role === "admin" ? `覆盖 **${wardCount} 个账户** 的平台流水` : "基于当前可见流水";
+        const scope = `覆盖 ${periodLabel} 内 **${wardCount} 个账户** 的有权访问流水`;
         const riskText = highValueCount > 0
             ? `发现 **${highValueCount} 笔**金额不低于 800 的交易，建议结合监护阈值和审批状态复核。`
             : "未发现达到 800 的高额交易，当前金额分布较平稳。";
@@ -1055,7 +1201,7 @@ app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
 
     let systemPrompt = "";
     if (role === 'admin') {
-        systemPrompt = "你是一个平台级的区块链金融审计与数据分析专家。你的任务是分析智能监护平台全网的交易流水，评估全网的运行状况和潜在的系统性风险。分析应该包含：1. 全网整体交易规模与笔数分析；2. 消费商户与类别的全网集中度；3. 异常交易诊断（例如是否有刷单、过度高频交易、异常大额洗钱嫌疑）；4. 给系统管理员的运营与风控建议。使用中文，语气严谨、专业，排版精美。";
+        systemPrompt = "你是一个平台级的区块链金融审计与数据分析专家。根据提供的统计数据分析所选日期范围的交易；明细若只有部分样本，不得把样本中的异常结论推广到全量。分析交易规模、消费类别、异常线索，并给出运营与风控建议。使用中文，语气严谨、专业，排版清晰。";
     } else if (role === 'guardian') {
         systemPrompt = "你是一个专业的家庭教育与智能监护顾问。你的任务是分析被监护成员的区块链消费行为，协助监护人了解家人的支出状况。分析应该包含：1. 成员支出的主要领域及趋势；2. 大额消费与超额触发预警的情况（哪些需要审批，哪些已自动通过）；3. 从监护人管理角度给出科学合理的干预建议（如调整阈值、沟通理财观念等）。使用中文，语气专业、客观，排版精美。";
     } else if (role === 'merchant') {
@@ -1064,7 +1210,7 @@ app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
         systemPrompt = "你是一个贴心的家庭智能财务顾问。你的任务是根据被监护人提供的区块链消费记录，分析其消费习惯。分析应该包含：1. 消费总支出与结构占比；2. 是否存在非必要消费、大额异常支出；3. 给出温和的、鼓励性的财务规划建议（如储蓄小目标、规避超支风险）。注意使用中文，语气温和、正面，并且排版精美（使用markdown，适当加粗和列表）。";
     }
 
-    const userPrompt = `以下是格式化后的交易流水记录：\n${JSON.stringify(formattedTxs, null, 2)}\n\n请针对上述数据为角色为 "${role}" 的用户生成详细的消费历史智能分析诊断报告。`;
+    const userPrompt = `分析日期：${periodLabel}。全量交易笔数：${txs.length}，总金额：${totalAmount.toFixed(2)}，类别笔数：${JSON.stringify(categoryCounts)}。以下是最近最多 200 笔明细${txs.length > 200 ? "（仅为样本）" : "（全部明细）"}：\n${JSON.stringify(formattedTxs)}\n\n请针对上述数据为角色为 "${role}" 的用户生成报告，并区分全量统计和明细样本。`;
 
     try {
         console.log(`[AI Analysis] Requesting DeepSeek for role: ${role}, total transactions: ${txs.length}`);
@@ -1090,21 +1236,30 @@ app.post("/api/analysis/consumption", auth.requireAuth, async (req, res) => {
             const analysisText = data.choices[0].message.content;
             
             // --- AI 诊断报告“哈希上链防篡改”逻辑 ---
-            let wardAddress = "";
-            for (const t of txs) {
-                const addr = t.ward || t.ward_address;
-                if (addr && addr !== "未知") {
-                    wardAddress = addr;
-                    break;
-                }
-            }
+            const wards = new Set(txs.map(t => String(t.ward_address).toLowerCase()));
+            const wardAddress = wards.size === 1 ? txs[0].ward_address : "";
 
             let reportHash = "";
             let onChainTxHash = null;
             const month = new Date().toISOString().slice(0, 7); // 格式：YYYY-MM
 
-            const mayPersistWardReport = req.auth.type === "admin" || role === "guardian" || role === "ward";
-            if (mayPersistWardReport && wardAddress && wardAddress.startsWith("0x")) {
+            let mayPersistWardReport = req.auth.type === "wallet" && role === "ward" && auth.sameAddress(principal, wardAddress);
+            if (mayPersistWardReport) {
+                try {
+                    const [monthlyRows] = await paymentService.dbPool.execute(
+                        "SELECT id FROM transactions WHERE LOWER(ward_address) = LOWER(?) AND DATE_FORMAT(created_at, '%Y-%m') = ?",
+                        [wardAddress, month]
+                    );
+                    const monthlyIds = new Set(monthlyRows.map(row => String(row.id)));
+                    const analyzedIds = hasDateRange ? txs.map(item => String(item.id)) : ids;
+                    mayPersistWardReport = monthlyIds.size > 0 && monthlyIds.size === analyzedIds.length
+                        && analyzedIds.every(id => monthlyIds.has(id));
+                } catch (dbErr) {
+                    console.error("Verify monthly report scope failed:", dbErr);
+                    mayPersistWardReport = false;
+                }
+            }
+            if (mayPersistWardReport) {
                 const crypto = require("crypto");
                 // 1. 使用 crypto 计算报告正文的 SHA-256 哈希值
                 reportHash = "0x" + crypto.createHash("sha256").update(analysisText).digest("hex");

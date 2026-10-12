@@ -82,7 +82,7 @@ export const seedTestAccount = () => {
   wardAccount.cardNumber ||= "6222020000000001";
   wardAccount.isBankUser = true;
   wardAccount.keystore ||= wardWallet.encryptSync("123");
-  wardAccount.accountName = "被监护人 (张三)";
+  wardAccount.accountName = "张三";
   wardAccount.role = "ward";
 
   // 账户 B: 监护人
@@ -97,7 +97,7 @@ export const seedTestAccount = () => {
   guardianAccount.cardNumber ||= "6222020000000002";
   guardianAccount.isBankUser = true;
   guardianAccount.keystore ||= guardianWallet.encryptSync("123");
-  guardianAccount.accountName = "监护人 (李四)";
+  guardianAccount.accountName = "李四";
   guardianAccount.role = "guardian";
 
   // 账户 C: 特约商户

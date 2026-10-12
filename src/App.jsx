@@ -100,11 +100,16 @@ function App() {
   const [alipaySubject, setAlipaySubject] = useState('餐饮美食');
   const [isAlipayLoading, setIsAlipayLoading] = useState(false);
   const [historyTxs, setHistoryTxs] = useState([]);
+  const [analysisTxs, setAnalysisTxs] = useState([]);
   const [selectedWardFilter, setSelectedWardFilter] = useState('all');
   const filteredHistoryTxs = React.useMemo(() => {
     if (selectedWardFilter === 'all') return historyTxs;
     return historyTxs.filter(tx => tx.ward.toLowerCase() === selectedWardFilter.toLowerCase());
   }, [historyTxs, selectedWardFilter]);
+  const filteredAnalysisTxs = React.useMemo(() => {
+    if (selectedWardFilter === 'all') return analysisTxs;
+    return analysisTxs.filter(tx => tx.ward.toLowerCase() === selectedWardFilter.toLowerCase());
+  }, [analysisTxs, selectedWardFilter]);
 
   // 支付宝扫码支付弹窗状态
   const [showQrModal, setShowQrModal] = useState(false);
@@ -120,7 +125,7 @@ function App() {
 
   const connectWallet = (bankAccount) => {
     setAccount(bankAccount.address);
-    setRole(bankAccount.role || 'user');
+    setRole(bankAccount.role === 'merchant' || bankAccount.role === 'admin' ? bankAccount.role : 'user');
     setIsLoggedIn(true);
   };
 
@@ -135,11 +140,13 @@ function App() {
     setPendingGuardianInfo(null);
     setPendingGuardianInvitationInfo(null);
     setActiveWards([]);
+    setAnalysisTxs([]);
     setSelectedWardFilter('all');
   };
 
   const fetchData = useCallback(async () => {
     if (!account) return;
+    setAnalysisTxs([]);
     if (account === 'admin') {
       setRole('admin');
       return;
@@ -153,24 +160,25 @@ function App() {
     const allAccounts = getAllLocalAccounts();
     const zeroAddr = "0x0000000000000000000000000000000000000000";
     let initialWards = [];
+    let initialGuardians = [];
 
     // 0. 双轨保障第一层：优先从后端 API / MySQL (双重记账) 快速读取监护状态与历史消费数据
     // 确保即使移动端 Android WebView 链上 RPC 延迟或同步中，也能秒级呈现所有历史记录
     try {
       const statusUrl = getApiUrl(`/api/guardian/status/${account}`);
       if (statusUrl) {
-        const statusRes = await authenticatedFetch(statusUrl, { signal: AbortSignal.timeout ? AbortSignal.timeout(2500) : undefined });
+        const statusRes = await authenticatedFetch(statusUrl, { signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined });
         if (statusRes.ok) {
           const statusData = await statusRes.json();
           if (statusData.success) {
             // 被监护人视角：绑定的监护人列表
             if (statusData.guardians && statusData.guardians.length > 0) {
-              const list = statusData.guardians.map(gAddr => {
+              initialGuardians = statusData.guardians.map(gAddr => {
                 const info = allAccounts.find(a => a.address.toLowerCase() === gAddr.toLowerCase());
                 return info || { address: gAddr, accountName: "已绑定监护人" };
               });
-              setGuardianInfos(list);
-              setGuardianInfo(list[0] || null);
+              setGuardianInfos(initialGuardians);
+              setGuardianInfo(initialGuardians[0] || null);
             }
 
             // 监护人视角：其名下的被监护人列表
@@ -180,8 +188,9 @@ function App() {
                 return info || { address: wAddr, accountName: `被监护人 (${wAddr.slice(0, 6)}...)`, threshold: "800", isFrozen: false };
               });
               setActiveWards(initialWards);
-              setRole('guardian');
             }
+
+            setRole(initialWards.length > 0 ? 'guardian' : initialGuardians.length > 0 ? 'ward' : 'user');
 
             if (statusData.threshold) {
               setMyThreshold(statusData.threshold.toString());
@@ -201,7 +210,7 @@ function App() {
               if (tx.ward.toLowerCase() === account.toLowerCase()) {
                 return {
                   ...tx,
-                  wardName: currentUser.role === 'guardian' ? "我 (监护人)" : "我"
+                  wardName: "我"
                 };
               }
               const info = allAccounts.find(a => a.address.toLowerCase() === tx.ward.toLowerCase());
@@ -212,6 +221,7 @@ function App() {
             });
             mappedDbTxs.sort((a, b) => b.timestamp - a.timestamp);
             setHistoryTxs(mappedDbTxs);
+            setAnalysisTxs(mappedDbTxs);
 
             // 如果存在待审批的交易且当前为监护人，做 pendingTxs 兜底
             const dbPending = mappedDbTxs.filter(t => t.isPending);
@@ -313,13 +323,14 @@ function App() {
     } catch (e) {}
 
     // 4. 被监护人信息：查询当前用户的监护人和申请中的监护人 (并行读取优化)
+    let activeGuardians = [];
     try {
       const [guardiansListRes, reqGuardianRes, invitationGuardianRes] = await Promise.all([
         contract.getWardGuardians(account).catch(() => []),
         contract.pendingWardToGuardian(account).catch(() => zeroAddr),
         contract.pendingGuardianInvites(account).catch(() => zeroAddr)
       ]);
-      const activeGuardians = guardiansListRes || [];
+      activeGuardians = guardiansListRes || [];
       const reqGuardian = reqGuardianRes || zeroAddr;
       const invitationGuardian = invitationGuardianRes || zeroAddr;
 
@@ -360,10 +371,8 @@ function App() {
       resolvedRole = 'merchant';
     } else {
       const hasWards = wardsList.length > 0;
-      const isGuardianOnChain = ids.length > 0 || txDetails.length > 0 || requests.length > 0 || hasWards;
-      const isGuardian = isGuardianOnChain || currentUser.role === 'guardian';
-      const isWard = guardianInfos.length > 0 || pendingGuardianInfo !== null || pendingGuardianInvitationInfo !== null || currentUser.role === 'ward';
-      resolvedRole = isGuardian ? 'guardian' : (isWard ? 'ward' : 'user');
+      const isWard = initialGuardians.length > 0 || activeGuardians.length > 0;
+      resolvedRole = hasWards ? 'guardian' : (isWard ? 'ward' : 'user');
     }
     setRole(resolvedRole);
 
@@ -410,7 +419,7 @@ function App() {
             if (tx.ward.toLowerCase() === account.toLowerCase()) {
               return {
                 ...tx,
-                wardName: resolvedRole === 'ward' ? "我" : "我 (监护人)"
+                wardName: "我"
               };
             }
             const info = allAccounts.find(a => a.address.toLowerCase() === tx.ward.toLowerCase());
@@ -1208,11 +1217,33 @@ function App() {
                   ? 'bg-blue-500/10 border border-blue-500/20 text-blue-400 shadow-sm shadow-blue-500/5' 
                   : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shadow-sm shadow-emerald-500/5'
               }`}>
-                {role === 'guardian' ? '🛡️ 监护人视角' : '👤 被监护人视角'}
+                普通用户
               </div>
             </div>
             <p className="text-sm text-slate-400 font-bold uppercase tracking-wider font-sans">Blockchain Safety Dashboard</p>
           </div>
+
+          {role === 'user' && (
+            <div className="space-y-4">
+              <div className="bg-slate-900/70 border border-slate-700/50 rounded-[32px] p-8">
+                <h4 className="text-lg font-bold text-white mb-4">建立监护关系</h4>
+                <p className="text-sm text-slate-400 mb-4">可以邀请一位已注册用户；对方同意后，监护关系才会生效。</p>
+                <form onSubmit={handleAddWard} className="flex flex-col sm:flex-row gap-3">
+                  <input
+                    type="tel"
+                    placeholder="被监护成员手机号"
+                    value={wardPhoneInput}
+                    onChange={(e) => setWardPhoneInput(e.target.value)}
+                    className="flex-1 bg-slate-950/40 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white"
+                  />
+                  <button type="submit" disabled={isAddingWard} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-5 py-3 rounded-xl text-sm font-bold">
+                    {isAddingWard ? '发送中...' : '发送邀请'}
+                  </button>
+                </form>
+              </div>
+              {pendingRequests.length > 0 && <RequestList requests={pendingRequests} onAction={handleRequestAction} loading={loading} />}
+            </div>
+          )}
 
           {role === 'ward' && isAccountFrozen && (
             <div className="bg-red-500/10 border border-red-500/20 rounded-2xl px-6 py-4 flex items-center space-x-4 shadow-lg shadow-red-500/5 animate-pulse">
@@ -1231,7 +1262,7 @@ function App() {
                 <div className="absolute top-[-30%] right-[-10%] w-[50%] h-[50%] bg-blue-500/10 blur-[80px] rounded-full pointer-events-none"></div>
                 <h3 className="text-2xl font-bold mb-4">您的钱包已受保护</h3>
                 <p className="text-slate-400 leading-relaxed mb-8 opacity-90 text-sm max-w-2xl font-sans">
-                  系统已开启监护人安全防护。作为监护人，您正在通过区块链账本实时监控和审批名下被监护成员的日常消费支出。
+                  已绑定的监护关系正在生效，您可以通过区块链账本查看并审批关联成员的日常消费支出。
                 </p>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div className="bg-slate-950/60 backdrop-blur-md rounded-2xl p-4 border border-slate-850/60">
@@ -1466,7 +1497,7 @@ function App() {
                 </form>
               </div>
 
-              <AiAnalysisCard txs={filteredHistoryTxs} role={role} />
+              <AiAnalysisCard txs={filteredAnalysisTxs} role={role} scopeWard={selectedWardFilter} />
 
               <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/60 pb-5">
@@ -1766,7 +1797,7 @@ function App() {
                 </form>
               </div>
               
-              <AiAnalysisCard txs={historyTxs} role={role} />
+              <AiAnalysisCard txs={analysisTxs} role={role} />
 
               <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-700/50 rounded-[32px] p-8 shadow-2xl">
                 <HistoryList txs={historyTxs} role={role} onContinuePay={handleContinuePay} />

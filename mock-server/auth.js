@@ -4,6 +4,7 @@ const { ethers } = require("ethers");
 const challenges = new Map();
 const sessions = new Map();
 const smsChallenges = new Map();
+const registrationChallenges = new Map();
 const SESSION_TTL_MS = 15 * 60 * 1000;
 const CHALLENGE_TTL_MS = 2 * 60 * 1000;
 const SMS_TTL_MS = 5 * 60 * 1000;
@@ -15,6 +16,7 @@ const pruneExpired = () => {
   for (const [address, challenge] of challenges) if (challenge.expiresAt < now) challenges.delete(address);
   for (const [token, session] of sessions) if (session.expiresAt < now) sessions.delete(token);
   for (const [phone, challenge] of smsChallenges) if (challenge.expiresAt < now) smsChallenges.delete(phone);
+  for (const [phone, challenge] of registrationChallenges) if (challenge.expiresAt < now) registrationChallenges.delete(phone);
 };
 
 const normalizePhone = (value) => {
@@ -58,6 +60,40 @@ const consumeAdminSmsCode = (phoneValue, codeValue) => {
   const valid = supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
   if (valid) smsChallenges.delete(phone);
   return valid;
+};
+
+const issueRegistrationSmsCode = (req, res) => {
+  pruneExpired();
+  const phone = normalizePhone(req.body?.phone);
+  if (!phone) return res.status(400).json({ success: false, error: "请输入有效的手机号" });
+  const existing = registrationChallenges.get(phone);
+  if (existing && Date.now() - existing.sentAt < SMS_RESEND_MS) {
+    return res.status(429).json({ success: false, error: "验证码已发送，请稍后再试" });
+  }
+  const code = crypto.randomInt(100000, 1000000).toString();
+  registrationChallenges.set(phone, { code, sentAt: Date.now(), expiresAt: Date.now() + SMS_TTL_MS, attempts: 0 });
+  console.log(`[Mock SMS] 注册手机号 ${phone.slice(0, 3)}****${phone.slice(-4)} 的验证码：${code}（5 分钟有效）`);
+  res.json({ success: true, expiresIn: SMS_TTL_MS / 1000,
+    ...(process.env.NODE_ENV !== "production" ? { mockCode: code } : {}) });
+};
+
+const verifyRegistrationSmsCode = (req, res) => {
+  pruneExpired();
+  const phone = normalizePhone(req.body?.phone);
+  const challenge = phone && registrationChallenges.get(phone);
+  if (!challenge) return res.status(401).json({ success: false, error: "验证码无效或已过期" });
+  challenge.attempts += 1;
+  if (challenge.attempts > SMS_MAX_ATTEMPTS) {
+    registrationChallenges.delete(phone);
+    return res.status(401).json({ success: false, error: "验证码尝试次数过多" });
+  }
+  const supplied = Buffer.from(String(req.body?.smsCode || ""));
+  const expected = Buffer.from(challenge.code);
+  if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+    return res.status(401).json({ success: false, error: "验证码错误" });
+  }
+  registrationChallenges.delete(phone);
+  res.json({ success: true });
 };
 
 const normalizeAddress = (value) => {
@@ -136,4 +172,4 @@ const sameAddress = (left, right) => {
   return Boolean(a && b && a === b);
 };
 
-module.exports = { issueChallenge, issueAdminSmsCode, createWalletSession, createAdminSession, requireAuth, requireAdmin, sameAddress };
+module.exports = { issueChallenge, issueAdminSmsCode, issueRegistrationSmsCode, verifyRegistrationSmsCode, createWalletSession, createAdminSession, requireAuth, requireAdmin, sameAddress };

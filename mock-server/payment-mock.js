@@ -2,7 +2,7 @@ const { ethers } = require("ethers");
 const fs = require("fs");
 const path = require("path");
 const mysql = require("mysql2/promise");
-require("dotenv").config({ path: path.join(__dirname, ".env") });
+require("dotenv").config({ path: path.join(__dirname, "../.env") });
 
 const CONTRACT_ABI = [
     "function recordPayment(address _ward, uint256 _amount, string calldata _merchantType) external",
@@ -10,7 +10,9 @@ const CONTRACT_ABI = [
     "function bannedMerchants(address,string) view returns (bool)",
     "function threshold(address) view returns (uint256)",
     "function wardToGuardian(address) view returns (address)",
+    "function getWardGuardians(address) view returns (address[] memory)",
     "function isWardGuardian(address,address) view returns (bool)",
+    "function owner() view returns (address)",
     "function bindGuardian(address _ward, address _guardian) external",
     "function adminSetThreshold(address _ward, uint256 _amount) external",
     "function transactions(uint256) view returns (uint256 id, address ward, uint256 amount, uint256 timestamp, string merchantType, bool isPending, bool isApproved, bool isPaid)",
@@ -22,7 +24,8 @@ const CONTRACT_ABI = [
     "event TransactionRejected(uint256 indexed txId, address indexed guardian)",
     "event PaymentAutoApproved(uint256 indexed txId, address indexed ward, uint256 amount)",
     "event PaymentPendingApproval(uint256 indexed txId, address indexed ward, uint256 amount)",
-    "event AccountFrozen(address indexed account, bool frozen, address indexed operator)"
+    "event AccountFrozen(address indexed account, bool frozen, address indexed operator)",
+    "event GuardianBound(address indexed ward, address indexed guardian)"
 ];
 
 class PaymentMockService {
@@ -336,12 +339,20 @@ class PaymentMockService {
 
     async markPaymentSuccess(txId) {
         try {
+            const paymentHash = await this.getPendingPaymentHash(txId);
+            const [matches] = await this.dbPool.execute(
+                "SELECT id FROM transactions WHERE tx_hash = ? LIMIT 2",
+                [paymentHash]
+            );
+            if (matches.length !== 1) {
+                throw new Error(`Expected one database transaction for on-chain payment ${txId}`);
+            }
             const tx = await this.contract.markPaymentSuccess(txId, { gasPrice: 0 });
             await tx.wait();
             
             await this.dbPool.execute(
-                "UPDATE transactions SET is_paid = 1 WHERE id = ?",
-                [txId]
+                "UPDATE transactions SET is_paid = 1 WHERE tx_hash = ?",
+                [paymentHash]
             );
             console.log(`[Oracle] Tx ${txId} successfully marked as paid on chain and MySQL.`);
             return { success: true };

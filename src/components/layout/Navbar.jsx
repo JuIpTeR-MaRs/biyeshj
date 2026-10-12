@@ -30,19 +30,19 @@ export const Navbar = ({ currentUser, role, onLogout, unreadCount = 0, onOpenMes
       Icon = ShoppingBag;
       break;
     case 'guardian':
-      roleLabel = "🛡️ 监护人";
+      roleLabel = "普通用户";
       badgeClass = "bg-blue-500/10 border border-blue-500/20 text-blue-400";
       logoGradient = "from-blue-600 to-indigo-600 shadow-blue-500/20";
       Icon = Shield;
       break;
     case 'ward':
-      roleLabel = "👤 被监护人";
+      roleLabel = "普通用户";
       badgeClass = "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400";
       logoGradient = "from-emerald-600 to-teal-600 shadow-emerald-500/20";
       Icon = User;
       break;
     default:
-      roleLabel = "👤 普通用户";
+      roleLabel = "普通用户";
       badgeClass = "bg-slate-500/10 border border-slate-500/20 text-slate-300";
       logoGradient = "from-slate-600 to-slate-700 shadow-slate-500/20";
       Icon = User;

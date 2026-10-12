@@ -42,17 +42,47 @@ test('requests without a bearer session are rejected', () => {
   assert.equal(res.statusCode, 401);
 });
 
+test('registration SMS code is required, rate limited, and single use', () => {
+  const phone = '13900001234';
+  const invalidPhone = response();
+  auth.issueRegistrationSmsCode({ body: { phone: '123' } }, invalidPhone);
+  assert.equal(invalidPhone.statusCode, 400);
+
+  const issued = response();
+  auth.issueRegistrationSmsCode({ body: { phone } }, issued);
+  assert.equal(issued.statusCode, 200);
+  assert.match(issued.body.mockCode, /^\d{6}$/);
+
+  const repeated = response();
+  auth.issueRegistrationSmsCode({ body: { phone } }, repeated);
+  assert.equal(repeated.statusCode, 429);
+
+  const wrong = response();
+  auth.verifyRegistrationSmsCode({ body: { phone, smsCode: '000000' } }, wrong);
+  assert.equal(wrong.statusCode, 401);
+
+  const verified = response();
+  auth.verifyRegistrationSmsCode({ body: { phone, smsCode: issued.body.mockCode } }, verified);
+  assert.equal(verified.statusCode, 200);
+
+  const reused = response();
+  auth.verifyRegistrationSmsCode({ body: { phone, smsCode: issued.body.mockCode } }, reused);
+  assert.equal(reused.statusCode, 401);
+});
+
 test('sensitive routes require authentication and payment failures fail closed', () => {
   const source = fs.readFileSync(path.join(__dirname, '../mock-server/index.js'), 'utf8');
-  for (const route of ['/api/bank/transfer', '/api/guardian/bind', '/api/guardian/threshold', '/api/alipay/pay', '/api/alipay/query', '/api/admin/all-data', '/api/analysis/consumption']) {
+  for (const route of ['/api/bank/transfer', '/api/guardian/bind', '/api/guardian/threshold', '/api/alipay/pay', '/api/alipay/query', '/api/admin/freeze', '/api/admin/all-data', '/api/analysis/consumption']) {
     const line = source.split(/\r?\n/).find(value => value.includes(`"${route}"`));
     assert.match(line || '', /auth\.requireAuth/);
   }
+  assert.match(source.split(/\r?\n/).find(value => value.includes('"/api/admin/freeze"')), /auth\.requireAdmin/);
   assert.doesNotMatch(source, /支付宝沙箱宕机，自动切入 Mock Fallback/);
   assert.doesNotMatch(source, /支付宝查询接口宕机，将订单/);
   assert.match(source, /status: "UNKNOWN"/);
   assert.match(source, /txDetail\[7\] === false/);
-  assert.match(source, /txs\.length === 0/);
+  assert.match(source, /requestedTxs\.length === 0/);
+  assert.match(source, /FROM transactions WHERE id IN/);
   assert.match(source, /approvedOrderReservations\.has/);
   assert.match(source, /mayPersistWardReport/);
   assert.match(source, /app\.listen\(PORT, HOST/);

@@ -16,28 +16,23 @@ async function main() {
   
   console.log(`✅ GuardianDApp deployed to: ${address}`);
 
-  // Create mock-server folder if not exists
-  const mockServerDir = path.join(__dirname, "../mock-server");
-  if (!fs.existsSync(mockServerDir)) {
-    fs.mkdirSync(mockServerDir);
+  const envPath = path.join(__dirname, "../.env");
+  const existingContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+  const chainSettings = {
+    RPC_URL: "http://127.0.0.1:8545",
+    ORACLE_PRIVATE_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    CONTRACT_ADDRESS: address
+  };
+  let envContent = existingContent;
+  for (const [key, value] of Object.entries(chainSettings)) {
+    const line = `${key}=${value}`;
+    const pattern = new RegExp(`^${key}=.*$`, "m");
+    envContent = pattern.test(envContent)
+      ? envContent.replace(pattern, line)
+      : `${envContent.trimEnd()}\n${line}\n`;
   }
-
-  // Update or Create .env in mock-server (preserving ALIPAY_ and DB_ variables)
-  const envPath = path.join(mockServerDir, ".env");
-  let preserveContent = "";
-  if (fs.existsSync(envPath)) {
-    const existingContent = fs.readFileSync(envPath, "utf8");
-    const preservedLines = existingContent.split("\n").filter(line => 
-      line.trim().startsWith("ALIPAY_") || line.trim().startsWith("DB_") || line.trim().startsWith("DEEPSEEK_") ||
-      line.trim().startsWith("ADMIN_PASSWORD=") || line.trim().startsWith("HOST=") || line.trim().startsWith("CORS_ORIGINS=")
-    );
-    if (preservedLines.length > 0) {
-      preserveContent = "\n\n" + preservedLines.join("\n");
-    }
-  }
-  const envContent = `RPC_URL=http://127.0.0.1:8545\nORACLE_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80\nCONTRACT_ADDRESS=${address}\nPORT=3000${preserveContent}`;
   fs.writeFileSync(envPath, envContent);
-  console.log("📝 Updated mock-server/.env (preserved configs)");
+  console.log("📝 Updated root .env (preserved configs)");
 
   // Also update frontend constant if needed
   const contractUtilPath = path.join(__dirname, "../src/utils/contract.js");

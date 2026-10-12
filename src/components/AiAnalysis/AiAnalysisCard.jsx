@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Loader2, RefreshCw, AlertCircle, FileText, Copy, Check, Lightbulb, TrendingUp, AlertTriangle, ShieldCheck, BarChart3 } from 'lucide-react';
 import { authenticatedFetch } from '../../utils/authenticatedFetch';
+import { getAllLocalAccounts } from '../../utils/bankAccount';
 import { toast } from 'react-toastify';
+import { DatePickerField } from './DatePickerField';
 
-export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
+export const AiAnalysisCard = ({ txs = [], role = 'ward', scopeWard = 'all' }) => {
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [analysis, setAnalysis] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
@@ -135,17 +139,23 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
   };
 
   const handleTriggerAnalysis = async () => {
-    if (txs.length === 0) return;
+    if (!startDate || !endDate || startDate > endDate) {
+      setError('请选择有效的起止日期');
+      return;
+    }
     setLoading(true);
     setError('');
     setAnalysis('');
     setVerificationResult(null);
 
     try {
+      const wardNames = Object.fromEntries(getAllLocalAccounts()
+        .filter(account => account.address && account.accountName)
+        .map(account => [account.address.toLowerCase(), account.accountName]));
       const response = await authenticatedFetch('/api/analysis/consumption', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ txs, role })
+        body: JSON.stringify({ role, startDate, endDate, scopeWard, wardNames })
       });
       const data = await response.json();
       if (data.success) {
@@ -156,7 +166,7 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
         setError(data.error || "获取AI分析报告失败");
       }
     } catch (err) {
-      setError("网络错误，无法连接至AI分析服务");
+      setError(err.message || "网络错误，无法连接至AI分析服务");
     } finally {
       setLoading(false);
     }
@@ -450,11 +460,12 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
           );
         })}
       </div>
+
     );
   };
 
   return (
-    <div className="relative overflow-hidden rounded-[32px] border transition-all duration-300 p-6 bg-slate-900/40 border-slate-800/60 shadow-2xl text-slate-300 hover:border-slate-800">
+    <div className="relative overflow-visible rounded-[32px] border transition-all duration-300 p-6 bg-slate-900/40 border-slate-800/60 shadow-2xl text-slate-300 hover:border-slate-800">
       {/* 霓虹流光背景挂件 */}
       <div className={`absolute top-[-50%] right-[-30%] w-72 h-72 rounded-full blur-[100px] pointer-events-none opacity-10 transition-all ${
         loading ? 'animate-pulse scale-110' : ''
@@ -471,7 +482,7 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
               <span>AI 消费习惯智能诊断</span>
               <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${accentBgLight} ${accentTextLight} border-${accentText}/20`}>DeepSeek Powered</span>
             </h4>
-            <p className="text-[10px] text-slate-500 mt-0.5">利用区块链全量账单，深度画像资金风险特征</p>
+            <p className="text-[10px] text-slate-500 mt-0.5">按日期分析有权查看的交易流水</p>
           </div>
         </div>
 
@@ -494,6 +505,13 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
             </button>
           </div>
         )}
+      </div>
+
+      <div className="mb-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <DatePickerField label="开始日期" value={startDate} max={endDate} disabled={loading} accentBg={accentBg}
+          onChange={date => { setStartDate(date); setAnalysis(''); setError(''); }} />
+        <DatePickerField label="结束日期（含当天）" value={endDate} min={startDate} disabled={loading} accentBg={accentBg} alignRight
+          onChange={date => { setEndDate(date); setAnalysis(''); setError(''); }} />
       </div>
 
       {/* 主面板内容区 */}
@@ -539,24 +557,16 @@ export const AiAnalysisCard = ({ txs = [], role = 'ward' }) => {
               <FileText className="w-7 h-7" />
             </div>
             <p className="text-sm font-bold mb-1 text-white">
-              {txs.length === 0 
-                ? "暂无消费记录可供诊断" 
-                : role === 'admin' 
-                  ? "全网交易账目就绪，可启动 AI 平台级财务审计" 
-                  : "个人历史消费流水已同步，可进行 AI 深度诊断"
-              }
+              {"请选择日期范围，分析该期间的交易流水"}
             </p>
             <p className="text-xs text-slate-500 max-w-xs mx-auto mb-6">
-              {txs.length === 0 
-                ? "一旦被监护人发生真实消费，预言机将自动上链，此时即可使用 AI 分析。" 
-                : "大模型将从消费频次、金额阈值分布、风控审批等多个维度自动为您生成综合报告与建议。"
-              }
+              {"服务端将按所选日期读取有权查看的流水，并生成报告。"}
             </p>
             <button
               onClick={handleTriggerAnalysis}
-              disabled={txs.length === 0}
+              disabled={!startDate || !endDate || startDate > endDate}
               className={`px-8 py-3.5 rounded-2xl text-xs font-black uppercase tracking-wider transition-all duration-300 transform active:scale-95 shadow-md flex items-center space-x-2 ${
-                txs.length === 0
+                !startDate || !endDate || startDate > endDate
                   ? 'bg-slate-900/20 text-slate-600 border border-slate-850 cursor-not-allowed'
                   : `bg-gradient-to-r ${accentGradient} text-white shadow-lg`
               }`}

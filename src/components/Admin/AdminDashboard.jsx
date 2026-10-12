@@ -131,17 +131,17 @@ export const AdminDashboard = ({ onLogout }) => {
   const handleToggleFreeze = async (userAddress, currentFrozen) => {
     setFreezingUser(userAddress);
     try {
-      const contract = await getContract();
-      const tx = await contract.setFreezeAccount(userAddress, !currentFrozen);
-      toast.info(`正在提交${!currentFrozen ? '冻结' : '解冻'}该账户的交易...`);
-      await tx.wait();
-      toast.success(`${!currentFrozen ? '已成功冻结' : '已成功解冻'}该账户`);
-      
-      // Update local state
-      setUsers(prev => prev.map(u => u.address === userAddress ? { ...u, isFrozen: !currentFrozen } : u));
+      const response = await authenticatedFetch('/api/admin/freeze', {
+        method: 'POST',
+        body: JSON.stringify({ address: userAddress, freeze: !currentFrozen })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || '链上冻结操作失败');
+      setUsers(prev => prev.map(u => u.address === userAddress ? { ...u, isFrozen: result.isFrozen } : u));
+      toast.success(result.isFrozen ? '已成功冻结该账户' : '已成功解冻该账户');
     } catch (err) {
       console.error(err);
-      toast.error(err.reason || `${!currentFrozen ? '冻结' : '解冻'}账户失败`);
+      toast.error(err.message || `${!currentFrozen ? '冻结' : '解冻'}账户失败`);
     } finally {
       setFreezingUser(null);
     }
@@ -238,11 +238,10 @@ export const AdminDashboard = ({ onLogout }) => {
                             <td className="px-6 py-4 font-mono whitespace-nowrap">{u.phone}</td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span className={`inline-block whitespace-nowrap px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border ${
-                                u.role === 'guardian' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400'
-                                  : u.role === 'merchant' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                                u.role === 'merchant' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
                                   : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
                               }`}>
-                                {u.role === 'guardian' ? '监护人' : u.role === 'merchant' ? '特约商户' : '被监护人'}
+                                {u.role === 'merchant' ? '商户' : '普通用户'}
                               </span>
                             </td>
                             <td className="px-6 py-4 font-mono text-xs text-slate-500 whitespace-nowrap">{u.address}</td>
